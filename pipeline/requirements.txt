@@ -1,0 +1,39 @@
+# --- Core data ---
+yfinance==0.2.50
+pandas==2.2.3
+numpy==2.0.2
+
+# --- Technical analysis ---
+ta==0.11.0
+
+# --- HTTP ---
+httpx==0.28.1
+requests==2.32.3
+
+# --- Database ---
+supabase==2.10.0
+postgrest==0.18.0
+
+# --- NLP via HuggingFace Inference API ---
+huggingface-hub==0.27.1
+
+# --- Reddit ---
+praw==7.8.1
+
+# --- Market calendar (trading days) ---
+pandas-market-calendars==4.5.1
+
+# --- Observability ---
+sentry-sdk==2.20.0
+
+# --- Config ---
+python-dotenv==1.0.1
+
+# --- SEC filings ---
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# --- Tests ---
+pytest==8.3.4
+pytest-asyncio==0.25.2
+respx==0.22.0       # httpx mock

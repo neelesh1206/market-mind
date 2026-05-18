@@ -1,0 +1,94 @@
+"""Supabase client + typed write helpers for the pipeline."""
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+from uuid import UUID
+
+from supabase import Client, create_client
+
+
+def make_client(url: str, service_key: str) -> Client:
+    """Service-role client — bypasses RLS. Pipeline-use only, never client-side."""
+    return create_client(url, service_key)
+
+
+def fetch_active_stocks(client: Client) -> list[dict[str, Any]]:
+    """Return all active stocks in the pool."""
+    res = client.table("stocks").select("*").eq("is_active", True).execute()
+    return res.data or []
+
+
+def upsert_stock_insight(client: Client, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Upsert a single stock_insights row on (stock_id, insight_date).
+    Returns the inserted/updated row.
+    """
+    res = (
+        client.table("stock_insights")
+        .upsert(payload, on_conflict="stock_id,insight_date")
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise RuntimeError("upsert_stock_insight returned no rows")
+    return rows[0]
+
+
+def insert_articles(client: Client, articles: list[dict[str, Any]]) -> None:
+    if not articles:
+        return
+    client.table("insight_articles").insert(articles).execute()
+
+
+def record_source(
+    client: Client,
+    *,
+    insight_id: UUID | str,
+    source_name: str,
+    status: str,
+    latency_ms: int | None = None,
+    error_detail: str | None = None,
+    raw_data: dict[str, Any] | None = None,
+) -> None:
+    client.table("stock_insight_sources").insert(
+        {
+            "insight_id": str(insight_id),
+            "source_name": source_name,
+            "status": status,
+            "latency_ms": latency_ms,
+            "error_detail": error_detail,
+            "raw_data": raw_data,
+        }
+    ).execute()
+
+
+def start_pipeline_run(client: Client, *, run_type: str, triggered_by: str = "cron") -> str:
+    res = (
+        client.table("pipeline_runs")
+        .insert({"run_type": run_type, "status": "running", "triggered_by": triggered_by})
+        .execute()
+    )
+    return res.data[0]["id"]
+
+
+def complete_pipeline_run(
+    client: Client,
+    *,
+    run_id: str,
+    status: str,
+    stocks_processed: int,
+    sources_succeeded: int,
+    sources_failed: int,
+    error_summary: dict[str, Any] | None = None,
+) -> None:
+    client.table("pipeline_runs").update(
+        {
+            "status": status,
+            "completed_at": "now()",
+            "stocks_processed": stocks_processed,
+            "sources_succeeded": sources_succeeded,
+            "sources_failed": sources_failed,
+            "error_summary": error_summary,
+        }
+    ).eq("id", run_id).execute()
