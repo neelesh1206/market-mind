@@ -67,10 +67,30 @@ def _classify_volume_trend(volume: pd.Series) -> str:
 
 
 class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
-    """Pulls 1 year of daily bars and computes technicals."""
+    """Pulls 1 year of daily bars and computes technicals.
+
+    Uses a curl_cffi session impersonating Chrome to bypass Yahoo's bot
+    detection that otherwise returns empty JSON to data-center IPs
+    (GitHub Actions runners).
+    """
 
     name = "yfinance_price"
-    timeout_seconds = 20.0
+    timeout_seconds = 25.0
+
+    _session = None
+
+    @classmethod
+    def _get_session(cls):
+        """Lazy curl_cffi session, reused across calls in this process."""
+        if cls._session is None:
+            try:
+                from curl_cffi import requests as cffi_requests
+
+                cls._session = cffi_requests.Session(impersonate="chrome")
+            except ImportError:
+                log.warning("curl_cffi not installed; using default requests session (may hit Yahoo bot block)")
+                cls._session = None
+        return cls._session
 
     async def _fetch_impl(self, ticker: str) -> PriceSnapshot:
         # yfinance is sync — offload to a thread so the orchestrator can parallelize.
@@ -79,8 +99,8 @@ class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
             raise RuntimeError(f"yfinance returned empty frame for {ticker}")
         return self._build_snapshot(ticker, df)
 
-    @staticmethod
-    def _download(ticker: str) -> pd.DataFrame:
+    def _download(self, ticker: str) -> pd.DataFrame:
+        session = self._get_session()
         return yf.download(
             ticker,
             period="1y",
@@ -88,6 +108,7 @@ class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
             progress=False,
             auto_adjust=True,
             threads=False,
+            session=session,
         )
 
     @staticmethod

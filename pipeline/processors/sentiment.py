@@ -1,37 +1,30 @@
 """
-FinBERT sentiment processor via HuggingFace Inference API.
+FinBERT sentiment processor via HuggingFace `InferenceClient`.
 
-Why HF API (not local model):
-- No local model weights to manage (~440MB for FinBERT)
-- Free tier is plenty for ~500 inferences/day (our scale)
-- HF Pro upgrades give better throughput + dedicated inference
+HuggingFace migrated from the legacy `api-inference.huggingface.co` endpoint
+to the new Inference Providers routing (`router.huggingface.co`). The
+`huggingface_hub` Python library handles this transparently — we use it
+instead of raw HTTP so we don't have to track endpoint changes ourselves.
 
-Output format from HF text-classification:
-[
-  [
-    {"label": "positive", "score": 0.85},
-    {"label": "neutral",  "score": 0.10},
-    {"label": "negative", "score": 0.05}
-  ]
-]
-
-We convert to a single signed score in [-1, 1] (positive - negative).
+Free tier is plenty for our scale (~500 inferences/nightly batch). The first
+call to a "cold" model can take 10-30s while it loads — subsequent calls
+are fast. We swallow individual failures so one bad article doesn't kill
+the batch.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from datetime import datetime, timezone
 
-import httpx
+from huggingface_hub import InferenceClient
+from huggingface_hub.errors import HfHubHTTPError
 
 from ..fetchers.types import NewsArticle
 
 log = logging.getLogger("marketmind.sentiment")
 
 MODEL = "ProsusAI/finbert"
-HF_URL = f"https://api-inference.huggingface.co/models/{MODEL}"
 
 
 class FinBertSentimentProcessor:
@@ -40,7 +33,7 @@ class FinBertSentimentProcessor:
     def __init__(self, api_key: str, *, max_chars: int = 800) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
-        self.api_key = api_key
+        self._client = InferenceClient(model=MODEL, token=api_key, timeout=30)
         self.max_chars = max_chars
 
     async def score(self, articles: list[NewsArticle]) -> None:
@@ -48,34 +41,34 @@ class FinBertSentimentProcessor:
         if not articles:
             return
 
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
-            # HF API accepts a single string per request; parallelize across articles.
-            tasks = [self._score_one(client, a) for a in articles]
-            await asyncio.gather(*tasks, return_exceptions=True)
+        # text_classification is synchronous on the client; offload each call to a thread
+        # so we can parallelize. Default thread pool is fine for this volume.
+        await asyncio.gather(
+            *(asyncio.to_thread(self._score_one, a) for a in articles),
+            return_exceptions=True,
+        )
 
-    async def _score_one(self, client: httpx.AsyncClient, article: NewsArticle) -> None:
+    def _score_one(self, article: NewsArticle) -> None:
         text = self._truncate(article.body or article.headline)
         if not text:
             return
 
         try:
-            r = await client.post(HF_URL, json={"inputs": text, "options": {"wait_for_model": True}})
-            r.raise_for_status()
-            payload = r.json()
-        except Exception as e:
+            results = self._client.text_classification(text)
+        except HfHubHTTPError as e:
+            log.warning("finbert_http url=%s status=%s", article.url, e.response.status_code if e.response else "?")
+            return
+        except Exception as e:  # noqa: BLE001
             log.warning("finbert_failed url=%s err=%s", article.url, e)
             return
 
-        # Payload: [[{label, score}, ...]]
-        if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
-            return
-
+        # InferenceClient returns a list of {label, score} dicts.
+        # FinBERT labels: 'positive', 'neutral', 'negative'.
         scores: dict[str, float] = {}
-        for entry in payload[0]:
-            label = (entry.get("label") or "").lower()
-            score = float(entry.get("score", 0.0))
-            scores[label] = score
+        for entry in results or []:
+            label = entry.label.lower() if hasattr(entry, "label") else (entry.get("label") or "").lower()
+            score = entry.score if hasattr(entry, "score") else float(entry.get("score", 0.0))
+            scores[label] = float(score)
 
         positive = scores.get("positive", 0.0)
         negative = scores.get("negative", 0.0)

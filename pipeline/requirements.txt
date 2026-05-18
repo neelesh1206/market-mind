@@ -1,5 +1,8 @@
 # --- Core data ---
-yfinance==0.2.50
+# yfinance pinned to a recent release; curl_cffi bypasses Yahoo's bot detection
+# that blocks data-center IPs (GitHub Actions runners share these).
+yfinance>=0.2.55,<0.3
+curl_cffi>=0.7.0
 pandas==2.2.3
 numpy==2.0.2
 
@@ -15,8 +18,10 @@ requests==2.32.3
 supabase==2.10.0
 postgrest==0.18.0
 
-# --- NLP via HuggingFace Inference API ---
-huggingface-hub==0.27.1
+# --- NLP via HuggingFace Inference Providers ---
+# >=0.28 includes the Inference Providers routing that replaced the legacy
+# api-inference.huggingface.co URL pattern (which now 404s for many models).
+huggingface-hub>=0.28.0,<0.31
 
 # --- Reddit ---
 praw==7.8.1
