@@ -1,0 +1,443 @@
+"""
+MarketMind insights pipeline — main entry point.
+
+Run for a single stock (testing):
+    python -m pipeline.fetch_insights --ticker NVDA --dry-run
+
+Run the full nightly batch (default — used by the GitHub Action):
+    python -m pipeline.fetch_insights
+
+Behavior:
+1. Load env config; init Sentry + logging
+2. Start a `pipeline_runs` record (status='running')
+3. Fetch active stocks from Supabase (optionally limited / filtered)
+4. Fetch market-wide macro once (FRED VIX)
+5. For each stock, run all fetchers in parallel:
+   - yfinance: prices + technicals
+   - Massive: news headlines
+   - Finnhub: analyst ratings + earnings
+   - SEC EDGAR: insider Form 4 / 8-K
+6. FinBERT-score each article (if HF key present)
+7. Aggregate signals into bucket scores
+8. Upsert stock_insights row
+9. Insert top 3 articles → insight_articles
+10. Record per-source audit → stock_insight_sources
+11. Mark pipeline_runs as complete with success/partial/failed
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
+
+from .config import load_config
+from .fetchers.base import FetchResult
+from .fetchers.finnhub import FinnhubAnalystFetcher, FinnhubEarningsFetcher
+from .fetchers.fred import FredMacroFetcher
+from .fetchers.massive import MassiveNewsFetcher
+from .fetchers.sec_edgar import SecInsiderFetcher
+from .fetchers.types import (
+    AnalystSnapshot,
+    EarningsSnapshot,
+    InsiderSnapshot,
+    MacroSnapshot,
+    NewsArticle,
+    PriceSnapshot,
+    SocialSnapshot,
+)
+from .fetchers.yfinance_fetcher import YFinancePriceFetcher
+from .observability import capture_error, init_logging, init_sentry
+from .processors.aggregator import aggregate
+from .processors.sentiment import (
+    FinBertSentimentProcessor,
+    aggregate_sentiment,
+    cross_source_agreement,
+)
+from .supabase_client import (
+    complete_pipeline_run,
+    fetch_active_stocks,
+    insert_articles,
+    make_client,
+    record_source,
+    start_pipeline_run,
+    upsert_stock_insight,
+)
+from .trading_calendar import next_trading_day
+
+
+@dataclass
+class StockRow:
+    id: str
+    ticker: str
+    name: str
+    sector: str
+
+
+def _to_stock_rows(rows: list[dict[str, Any]]) -> list[StockRow]:
+    return [
+        StockRow(
+            id=r["id"],
+            ticker=r["ticker"],
+            name=r["name"],
+            sector=r["sector"],
+        )
+        for r in rows
+    ]
+
+
+async def run(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    init_sentry(cfg.sentry_dsn)
+    log = init_logging(cfg.log_level)
+
+    log.info(
+        "pipeline_start dry_run=%s ticker=%s limit=%s",
+        cfg.dry_run or args.dry_run,
+        args.ticker,
+        args.limit,
+    )
+
+    supabase = make_client(cfg.supabase_url, cfg.supabase_service_key)
+
+    stocks_rows = fetch_active_stocks(supabase)
+    stocks = _to_stock_rows(stocks_rows)
+
+    if args.ticker:
+        stocks = [s for s in stocks if s.ticker.upper() == args.ticker.upper()]
+        if not stocks:
+            log.error("ticker_not_found ticker=%s", args.ticker)
+            return 2
+    if args.limit:
+        stocks = stocks[: args.limit]
+
+    log.info("processing_stocks count=%s", len(stocks))
+
+    target_date = args.date or next_trading_day().isoformat()
+
+    run_id = None
+    if not (cfg.dry_run or args.dry_run):
+        run_id = start_pipeline_run(
+            supabase,
+            run_type="insights",
+            triggered_by="manual" if args.ticker else "cron",
+        )
+        log.info("pipeline_run_id=%s", run_id)
+
+    # Build fetchers (skip ones we don't have keys for)
+    price_fetcher = YFinancePriceFetcher()
+    news_fetcher = MassiveNewsFetcher(cfg.massive_api_key) if cfg.massive_api_key else None
+    analyst_fetcher = FinnhubAnalystFetcher(cfg.finnhub_api_key) if cfg.finnhub_api_key else None
+    earnings_fetcher = FinnhubEarningsFetcher(cfg.finnhub_api_key) if cfg.finnhub_api_key else None
+    insider_fetcher = SecInsiderFetcher()
+
+    sentiment_processor = (
+        FinBertSentimentProcessor(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
+    )
+
+    # Market-wide macro: fetch once.
+    macro: MacroSnapshot | None = None
+    if cfg.fred_api_key:
+        fred = FredMacroFetcher(cfg.fred_api_key)
+        result = await fred.fetch("MARKET")
+        if result.status == "success":
+            macro = result.data
+        else:
+            log.warning("fred_failed err=%s", result.error)
+
+    stats = {"processed": 0, "sources_succeeded": 0, "sources_failed": 0, "errors": []}
+
+    for stock in stocks:
+        try:
+            await _process_stock(
+                stock=stock,
+                target_date=target_date,
+                supabase=supabase,
+                dry_run=cfg.dry_run or args.dry_run,
+                price_fetcher=price_fetcher,
+                news_fetcher=news_fetcher,
+                analyst_fetcher=analyst_fetcher,
+                earnings_fetcher=earnings_fetcher,
+                insider_fetcher=insider_fetcher,
+                sentiment_processor=sentiment_processor,
+                macro=macro,
+                stats=stats,
+                log=log,
+            )
+            stats["processed"] += 1
+        except Exception as e:  # noqa: BLE001
+            capture_error(e, ticker=stock.ticker)
+            log.exception("stock_failed ticker=%s", stock.ticker)
+            stats["errors"].append({"ticker": stock.ticker, "error": str(e)})
+
+    status = "success"
+    if stats["sources_failed"] > stats["sources_succeeded"]:
+        status = "partial"
+    if stats["processed"] == 0:
+        status = "failed"
+
+    if run_id:
+        complete_pipeline_run(
+            supabase,
+            run_id=run_id,
+            status=status,
+            stocks_processed=stats["processed"],
+            sources_succeeded=stats["sources_succeeded"],
+            sources_failed=stats["sources_failed"],
+            error_summary={"errors": stats["errors"][:10]} if stats["errors"] else None,
+        )
+
+    log.info(
+        "pipeline_done status=%s processed=%s ok=%s failed=%s",
+        status,
+        stats["processed"],
+        stats["sources_succeeded"],
+        stats["sources_failed"],
+    )
+    return 0 if status == "success" else 1
+
+
+async def _process_stock(
+    *,
+    stock: StockRow,
+    target_date: str,
+    supabase: Any,
+    dry_run: bool,
+    price_fetcher: YFinancePriceFetcher,
+    news_fetcher: MassiveNewsFetcher | None,
+    analyst_fetcher: FinnhubAnalystFetcher | None,
+    earnings_fetcher: FinnhubEarningsFetcher | None,
+    insider_fetcher: SecInsiderFetcher,
+    sentiment_processor: FinBertSentimentProcessor | None,
+    macro: MacroSnapshot | None,
+    stats: dict[str, Any],
+    log: logging.Logger,
+) -> None:
+    log.info("stock_start ticker=%s", stock.ticker)
+
+    # Parallel fetch across sources.
+    tasks: list[Any] = [price_fetcher.fetch(stock.ticker)]
+    labels: list[str] = ["price"]
+
+    if news_fetcher:
+        tasks.append(news_fetcher.fetch(stock.ticker))
+        labels.append("news")
+    if analyst_fetcher:
+        tasks.append(analyst_fetcher.fetch(stock.ticker))
+        labels.append("analyst")
+    if earnings_fetcher:
+        tasks.append(earnings_fetcher.fetch(stock.ticker))
+        labels.append("earnings")
+    tasks.append(insider_fetcher.fetch(stock.ticker))
+    labels.append("insider")
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    results: dict[str, FetchResult[Any]] = {}
+    for label, res in zip(labels, raw_results, strict=False):
+        if isinstance(res, BaseException):
+            log.warning("fetcher_exception label=%s ticker=%s err=%s", label, stock.ticker, res)
+            stats["sources_failed"] += 1
+            continue
+        results[label] = res
+        if res.status == "success":
+            stats["sources_succeeded"] += 1
+        else:
+            stats["sources_failed"] += 1
+
+    # Unpack typed results (None if missing/failed).
+    price: PriceSnapshot | None = _data(results.get("price"))
+    articles: list[NewsArticle] = _data(results.get("news")) or []
+    analyst: AnalystSnapshot | None = _data(results.get("analyst"))
+    earnings: EarningsSnapshot | None = _data(results.get("earnings"))
+    insider: InsiderSnapshot | None = _data(results.get("insider"))
+    social: SocialSnapshot | None = None  # social fetchers added in Day 2+
+
+    # FinBERT-score articles in place.
+    if sentiment_processor and articles:
+        try:
+            await sentiment_processor.score(articles)
+        except Exception as e:  # noqa: BLE001
+            log.warning("sentiment_failed ticker=%s err=%s", stock.ticker, e)
+
+    sentiment_value, article_count = aggregate_sentiment(articles)
+    sources_agree, sources_total = cross_source_agreement(articles)
+
+    buckets = aggregate(
+        price=price,
+        articles=articles,
+        sentiment_score=sentiment_value,
+        sentiment_article_count=article_count,
+        sources_agree=sources_agree,
+        sources_total=sources_total,
+        analyst=analyst,
+        insider=insider,
+        earnings=earnings,
+        social=social,
+        macro=macro,
+    )
+
+    payload = _build_insight_payload(
+        stock_id=stock.id,
+        target_date=target_date,
+        price=price,
+        articles=articles,
+        sentiment_value=sentiment_value,
+        article_count=article_count,
+        sources_agree=sources_agree,
+        sources_total=sources_total,
+        analyst=analyst,
+        earnings=earnings,
+        insider=insider,
+        social=social,
+        macro=macro,
+        buckets=buckets,
+    )
+
+    if dry_run:
+        log.info("dry_run_payload ticker=%s scores=%s", stock.ticker, _scores_repr(buckets))
+        return
+
+    inserted = upsert_stock_insight(supabase, payload)
+    insight_id = inserted["id"]
+    log.info("inserted ticker=%s insight_id=%s scores=%s", stock.ticker, insight_id, _scores_repr(buckets))
+
+    # Top-3 articles → insight_articles
+    top_articles = sorted(
+        [a for a in articles if a.sentiment is not None],
+        key=lambda a: abs(a.sentiment or 0),
+        reverse=True,
+    )[:3]
+    if top_articles:
+        insert_articles(
+            supabase,
+            [
+                {
+                    "insight_id": insight_id,
+                    "headline": a.headline[:500],
+                    "url": a.url[:1000],
+                    "source": a.source[:100],
+                    "published_at": a.published_at.isoformat() if a.published_at else None,
+                    "sentiment": a.sentiment,
+                    "tldr": a.tldr,
+                    "display_rank": i + 1,
+                }
+                for i, a in enumerate(top_articles)
+            ],
+        )
+
+    # Audit trail per source
+    for label, result in results.items():
+        record_source(
+            supabase,
+            insight_id=insight_id,
+            source_name=label,
+            status=result.status,
+            latency_ms=result.latency_ms,
+            error_detail=result.error,
+        )
+
+
+def _data(result: FetchResult[Any] | None) -> Any:
+    if result is None or result.status != "success":
+        return None
+    return result.data
+
+
+def _scores_repr(buckets: Any) -> str:
+    return (
+        f"tech={buckets.technical} sent={buckets.sentiment} "
+        f"prof={buckets.professional} soc={buckets.social}"
+    )
+
+
+def _build_insight_payload(
+    *,
+    stock_id: str,
+    target_date: str,
+    price: PriceSnapshot | None,
+    articles: list[NewsArticle],
+    sentiment_value: float | None,
+    article_count: int,
+    sources_agree: int,
+    sources_total: int,
+    analyst: AnalystSnapshot | None,
+    earnings: EarningsSnapshot | None,
+    insider: InsiderSnapshot | None,
+    social: SocialSnapshot | None,
+    macro: MacroSnapshot | None,
+    buckets: Any,
+) -> dict[str, Any]:
+    top = articles[0] if articles else None
+
+    return {
+        "stock_id": stock_id,
+        "insight_date": target_date,
+        # Price
+        "prev_close": price.prev_close if price else None,
+        "day_change_pct": price.day_change_pct if price else None,
+        "week_change_pct": price.week_change_pct if price else None,
+        "month_change_pct": price.month_change_pct if price else None,
+        "ytd_change_pct": price.ytd_change_pct if price else None,
+        "fifty_two_week_high": price.fifty_two_week_high if price else None,
+        "fifty_two_week_low": price.fifty_two_week_low if price else None,
+        # Technical
+        "rsi_14": price.rsi_14 if price else None,
+        "macd_signal": price.macd_signal if price else None,
+        "price_vs_20ma": price.price_vs_20ma if price else None,
+        "price_vs_50ma": price.price_vs_50ma if price else None,
+        "bollinger_position": price.bollinger_position if price else None,
+        "volume_trend": price.volume_trend if price else None,
+        "technical_score": buckets.technical,
+        # Sentiment
+        "news_sentiment_score": sentiment_value,
+        "news_article_count": article_count,
+        "top_headline": top.headline[:500] if top else None,
+        "top_headline_url": top.url[:1000] if top else None,
+        "top_headline_source": top.source[:100] if top else None,
+        "sources_agree_count": sources_agree,
+        "sources_total_count": sources_total,
+        "sentiment_score": buckets.sentiment,
+        # Professional
+        "analyst_count": analyst.analyst_count if analyst else None,
+        "analyst_buy": analyst.analyst_buy if analyst else None,
+        "analyst_hold": analyst.analyst_hold if analyst else None,
+        "analyst_sell": analyst.analyst_sell if analyst else None,
+        "analyst_price_target": analyst.analyst_price_target if analyst else None,
+        "analyst_rating_change": analyst.rating_change if analyst else None,
+        "insider_activity": insider.activity if insider else None,
+        "insider_detail": insider.detail if insider else None,
+        "earnings_date": earnings.earnings_date.isoformat() if earnings and earnings.earnings_date else None,
+        "earnings_in_days": earnings.days_until if earnings else None,
+        "has_recent_8k": insider.has_recent_8k if insider else False,
+        "professional_score": buckets.professional,
+        # Social
+        "reddit_mention_count": social.reddit_mention_count if social else None,
+        "reddit_mention_delta": social.reddit_mention_delta if social else None,
+        "apewisdom_rank": social.apewisdom_rank if social else None,
+        "stocktwits_bullish": social.stocktwits_bullish if social else None,
+        "stocktwits_messages": social.stocktwits_messages if social else None,
+        "google_trend_score": social.google_trend_score if social else None,
+        "social_score": buckets.social,
+        # Macro
+        "sector_etf_change_pct": macro.sector_etf_change_pct if macro else None,
+        "vix_level": macro.vix_level if macro else None,
+        # Full breakdown payload
+        "signal_breakdown": buckets.breakdown,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Fetch and compute MarketMind stock insights.")
+    parser.add_argument("--ticker", help="Process a single ticker (testing)")
+    parser.add_argument("--limit", type=int, help="Process only N stocks (testing)")
+    parser.add_argument("--date", help="Target insight_date (ISO format). Defaults to next trading day.")
+    parser.add_argument("--dry-run", action="store_true", help="Do not write to Supabase")
+    args = parser.parse_args()
+    return asyncio.run(run(args))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

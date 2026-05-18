@@ -31,6 +31,7 @@ class Config:
 
     # Free APIs
     finnhub_api_key: str
+    fred_api_key: str
 
     # Reddit
     reddit_client_id: str
@@ -55,6 +56,7 @@ def load_config() -> Config:
         massive_api_key=_optional("MASSIVE_API_KEY"),
         huggingface_api_key=_optional("HUGGINGFACE_API_KEY"),
         finnhub_api_key=_optional("FINNHUB_API_KEY"),
+        fred_api_key=_optional("FRED_API_KEY"),
         reddit_client_id=_optional("REDDIT_CLIENT_ID"),
         reddit_client_secret=_optional("REDDIT_CLIENT_SECRET"),
         reddit_user_agent=_optional("REDDIT_USER_AGENT", "marketmind-pipeline/0.1"),
