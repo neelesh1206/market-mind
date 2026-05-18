@@ -1,5 +1,5 @@
 """
-Article summarizer via Llama-3 on HuggingFace Inference.
+Article summarizer via HuggingFace Inference (chat_completion API).
 
 Produces THREE fields per article for the trust UI:
   - tldr             : one sentence (≤ 140 chars) — for the card glance
@@ -8,20 +8,26 @@ Produces THREE fields per article for the trust UI:
                        bearish framing (e.g., "Bullish — analyst upgraded
                        NVDA ahead of next-week's earnings")
 
-Why a single prompt with delimiters (not JSON mode, not 3 separate calls):
-  - JSON mode requires provider-specific tooling we don't want to lock to
-  - 3 separate calls triple latency and token cost
-  - Llama-3-8B-Instruct follows simple "LABEL: text" templates very reliably
-  - Parsing is a one-line regex split — robust and free of JSON-escaping bugs
+Model + API notes:
+  - We use `chat_completion` (not `text_generation`) — it's the newer
+    OpenAI-compatible interface that routes cleanly across HF's Inference
+    Providers. `text_generation` against gated/Pro models tends to return
+    HfHubHTTPError with no response body, which is impossible to debug.
+  - Default model is Mistral-7B-Instruct-v0.3 — reliably available on the
+    free `hf-inference` provider. Llama-3 models are gated and often Pro-only.
+  - The model is configurable via `HUGGINGFACE_SUMMARY_MODEL` env var so we
+    can A/B without code changes.
 
-If parsing fails we still salvage whatever fields we can extract (tldr is
-the priority since it's what surfaces on the home feed). The article still
-gets inserted with whatever fields succeeded — never blocks the row.
+Output format:
+  Single labeled-line response (TLDR / SUMMARY / INFLUENCE). Parsing tolerates
+  mixed case, quotes, trailing punctuation, and partial output — if any one
+  field fails the others still land.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 
 from huggingface_hub import InferenceClient
@@ -31,7 +37,7 @@ from ..fetchers.types import NewsArticle
 
 log = logging.getLogger("marketmind.summarizer")
 
-MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+DEFAULT_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
 
 PROMPT_TEMPLATE = """You are a financial news analyst summarizing one article about {ticker} stock.
 
@@ -44,10 +50,7 @@ INFLUENCE: <one sentence, max 20 words, framed as Bullish/Bearish/Neutral and wh
 If the article is unrelated to {ticker} or has no signal value, write "Neutral — no direct signal" for INFLUENCE.
 
 Article headline: {headline}
-Article body: {body}
-
-Begin output:
-"""
+Article body: {body}"""
 
 LABEL_PATTERN = re.compile(
     r"^\s*(TLDR|SUMMARY|INFLUENCE)\s*:\s*(.+?)\s*$",
@@ -65,8 +68,18 @@ class LlamaSummarizer:
     def __init__(self, api_key: str, *, max_body_chars: int = 1200) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
-        self._client = InferenceClient(model=MODEL, token=api_key, timeout=45)
+        self.model = os.getenv("HUGGINGFACE_SUMMARY_MODEL", DEFAULT_MODEL)
+        # Explicit provider — bypasses the "auto" routing that sometimes lands
+        # on a paid provider and returns opaque errors. `hf-inference` is the
+        # free serverless tier.
+        self._client = InferenceClient(
+            provider="hf-inference",
+            model=self.model,
+            token=api_key,
+            timeout=45,
+        )
         self.max_body_chars = max_body_chars
+        log.info("summarizer_init model=%s", self.model)
 
     async def summarize(self, articles: list[NewsArticle], *, ticker: str) -> None:
         if not articles:
@@ -88,18 +101,36 @@ class LlamaSummarizer:
         )
 
         try:
-            raw = self._client.text_generation(
-                prompt,
-                max_new_tokens=200,
+            response = self._client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=220,
                 temperature=0.3,
-                return_full_text=False,
             )
         except HfHubHTTPError as e:
-            status = e.response.status_code if e.response else "?"
-            log.warning("llama_http url=%s status=%s", article.url, status)
+            # Log everything we can extract — these errors are the hardest to debug.
+            status = e.response.status_code if getattr(e, "response", None) else "?"
+            body_repr = ""
+            if getattr(e, "response", None):
+                try:
+                    body_repr = e.response.text[:200]
+                except Exception:
+                    pass
+            log.warning(
+                "llama_http url=%s status=%s err=%s body=%r",
+                article.url, status, str(e)[:200], body_repr,
+            )
             return
         except Exception as e:  # noqa: BLE001
-            log.warning("llama_failed url=%s err=%s", article.url, e)
+            log.warning(
+                "llama_failed url=%s type=%s err=%s",
+                article.url, type(e).__name__, str(e)[:300],
+            )
+            return
+
+        try:
+            raw = response.choices[0].message.content
+        except (AttributeError, IndexError, KeyError) as e:
+            log.warning("llama_bad_response url=%s err=%s", article.url, e)
             return
 
         if not raw:
