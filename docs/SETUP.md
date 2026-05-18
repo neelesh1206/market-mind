@@ -18,8 +18,8 @@ Manual steps to get MarketMind running locally and in production. Update this fi
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/neelesh1206/marketmind.git
-cd marketmind
+git clone https://github.com/neelesh1206/market-mind.git
+cd market-mind
 npm install
 ```
 

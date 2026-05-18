@@ -901,7 +901,7 @@ When shared on social, link previews show this image automatically. Strong viral
 ## Deployment
 
 ### Vercel
-1. Create project: import `neelesh1206/marketmind` repo
+1. Create project: import `neelesh1206/market-mind` repo
 2. Framework: Next.js (auto-detected)
 3. Environment variables → see env vars section
 4. Custom domain: `marketmind.neeleshkakaraparthi.dev`
