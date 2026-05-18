@@ -10,6 +10,7 @@ For deeper context on any decision, see corresponding ADR in [docs/adr/](docs/ad
 
 ## 2026-05-18
 
+- **actions-node24** — Bumped `actions/checkout@v4 → @v6` and `supabase/setup-cli@v1 → @v2` in both migration workflows. Clears the Node.js 20 deprecation warning ahead of GitHub's 2026-06-02 cutover; both new major versions run on Node 24.
 - **seed-as-migration** — Converted `supabase/seed.sql` into migration `20260518000002_seed_stocks.sql` (idempotent via `ON CONFLICT DO NOTHING`). Removes the failure-prone raw-psql seed step from the apply-migrations workflow; now the whole chain runs via `supabase db push`. Local dev still picks it up automatically through `supabase db reset`.
 - **ci-migrations** — Enterprise-grade migration pipeline. Two workflows: `validate-migrations.yml` runs on PR (spins up local Supabase, applies all migrations from scratch). `apply-migrations.yml` is manual-only via `workflow_dispatch`, requires typing literal `migrate` confirmation, runs dry-run before apply. Added `supabase/config.toml` for CLI + ADR 0006 documenting the design. Docs updated in SETUP + RUNBOOK.
 - **auth-flow** — Supabase auth integration via `@supabase/ssr`. Browser + server clients (`src/lib/supabase/{client,server}.ts`), session-refresh proxy at `src/proxy.ts` (Next.js 16 file convention — formerly `middleware.ts`), OAuth callback at `src/app/auth/callback/route.ts`, Google Sign-In login page at `/login` with Suspense-wrapped form, auth-gated home at `/` showing email + credit balance + streak. Sign-out button as a client component.
