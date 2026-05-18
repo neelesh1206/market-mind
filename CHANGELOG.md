@@ -8,6 +8,14 @@ For deeper context on any decision, see corresponding ADR in [docs/adr/](docs/ad
 
 ---
 
+## 2026-05-18 — Day 2
+
+- **backtest-harness** — `pipeline/backtest.py`: replays the technical bucket against `--months` of historical OHLCV (yfinance + curl_cffi), computes accuracy per score band (high bullish, low bullish, etc.), writes a CSV plus prints a stdout summary. No lookahead — each prediction uses only data available at end of evaluation day. Sentiment/professional/social backtests deferred (need historical news + filings — Week 2+).
+- **resolve-predictions-workflow** — `.github/workflows/resolve-predictions.yml`: cron at 21:15 UTC Mon–Fri (~4:15 PM ET, 15-min cushion for Yahoo to publish the close). `workflow_dispatch` with optional `--date` and `--dry-run`. Same `production` environment, only needs Supabase secrets.
+- **resolve-predictions-job** — `pipeline/resolve_predictions.py`: fetches unresolved predictions for the target date, fetches each ticker's day bar once via yfinance + curl_cffi, evaluates `direction` vs open→close direction. WIN = stake × 1.8, LOSS = 0, VOID = stake refund (on flat days or price unavailable). Updates `predictions`, appends to `credit_transactions`, bumps `user_profiles.total_predictions` + `correct_predictions`. Idempotent — only touches rows where `resolved=false`.
+- **social-signals** — `fetchers/stocktwits.py` (public API, no auth, bullish/bearish ratio from messages), `fetchers/apewisdom.py` (one cached request loads top ~500 WSB-mentioned tickers, looked up per-stock), `fetchers/reddit.py` (PRAW-backed mention counts across r/wallstreetbets, r/stocks, r/investing; gracefully skipped if creds absent). Orchestrator's `_build_social` coalesces all three into the `SocialSnapshot` consumed by the aggregator — fills the previously-null `social_score` bucket.
+- **llama-summarizer** — `processors/summarizer.py`: `LlamaSummarizer` uses `huggingface_hub.InferenceClient` to call `meta-llama/Meta-Llama-3-8B-Instruct`. Generates a 1-sentence TL;DR (max 140 chars) for the top 3 articles per stock — only the ones we surface in the UI, keeping inference cost low. Mutates `NewsArticle.tldr` in place.
+
 ## 2026-05-18
 
 - **fetch-insights-workflow** — `.github/workflows/fetch-insights.yml`: cron at 00:00 UTC Tue–Sat (~8 PM ET Mon–Fri), plus `workflow_dispatch` with `ticker`/`limit`/`dry_run` inputs for manual testing. Uses the `production` GitHub Environment, pulls all secrets from there (Supabase URL/service key + Massive/Finnhub/FRED/HF keys). Step summary links back to `pipeline_runs` in Supabase for post-run inspection.

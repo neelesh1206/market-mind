@@ -35,11 +35,13 @@ from datetime import date
 from typing import Any
 
 from .config import load_config
+from .fetchers.apewisdom import ApeWisdomFetcher
 from .fetchers.base import FetchResult
 from .fetchers.finnhub import FinnhubAnalystFetcher, FinnhubEarningsFetcher
 from .fetchers.fred import FredMacroFetcher
 from .fetchers.massive import MassiveNewsFetcher
 from .fetchers.sec_edgar import SecInsiderFetcher
+from .fetchers.stocktwits import StockTwitsFetcher
 from .fetchers.types import (
     AnalystSnapshot,
     EarningsSnapshot,
@@ -57,6 +59,7 @@ from .processors.sentiment import (
     aggregate_sentiment,
     cross_source_agreement,
 )
+from .processors.summarizer import LlamaSummarizer
 from .supabase_client import (
     complete_pipeline_run,
     fetch_active_stocks,
@@ -133,9 +136,22 @@ async def run(args: argparse.Namespace) -> int:
     analyst_fetcher = FinnhubAnalystFetcher(cfg.finnhub_api_key) if cfg.finnhub_api_key else None
     earnings_fetcher = FinnhubEarningsFetcher(cfg.finnhub_api_key) if cfg.finnhub_api_key else None
     insider_fetcher = SecInsiderFetcher()
+    stocktwits_fetcher = StockTwitsFetcher()
+    apewisdom_fetcher = ApeWisdomFetcher()
+    reddit_fetcher = None
+    if cfg.reddit_client_id and cfg.reddit_client_secret:
+        # Import lazily — praw transitively pulls in requests; cheap but unnecessary if skipped.
+        from .fetchers.reddit import RedditMentionFetcher
+
+        reddit_fetcher = RedditMentionFetcher(
+            cfg.reddit_client_id, cfg.reddit_client_secret, cfg.reddit_user_agent
+        )
 
     sentiment_processor = (
         FinBertSentimentProcessor(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
+    )
+    summarizer = (
+        LlamaSummarizer(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
     )
 
     # Market-wide macro: fetch once.
@@ -162,7 +178,11 @@ async def run(args: argparse.Namespace) -> int:
                 analyst_fetcher=analyst_fetcher,
                 earnings_fetcher=earnings_fetcher,
                 insider_fetcher=insider_fetcher,
+                stocktwits_fetcher=stocktwits_fetcher,
+                apewisdom_fetcher=apewisdom_fetcher,
+                reddit_fetcher=reddit_fetcher,
                 sentiment_processor=sentiment_processor,
+                summarizer=summarizer,
                 macro=macro,
                 stats=stats,
                 log=log,
@@ -211,7 +231,11 @@ async def _process_stock(
     analyst_fetcher: FinnhubAnalystFetcher | None,
     earnings_fetcher: FinnhubEarningsFetcher | None,
     insider_fetcher: SecInsiderFetcher,
+    stocktwits_fetcher: StockTwitsFetcher,
+    apewisdom_fetcher: ApeWisdomFetcher,
+    reddit_fetcher: Any | None,
     sentiment_processor: FinBertSentimentProcessor | None,
+    summarizer: LlamaSummarizer | None,
     macro: MacroSnapshot | None,
     stats: dict[str, Any],
     log: logging.Logger,
@@ -233,6 +257,13 @@ async def _process_stock(
         labels.append("earnings")
     tasks.append(insider_fetcher.fetch(stock.ticker))
     labels.append("insider")
+    tasks.append(stocktwits_fetcher.fetch(stock.ticker))
+    labels.append("stocktwits")
+    tasks.append(apewisdom_fetcher.fetch(stock.ticker))
+    labels.append("apewisdom")
+    if reddit_fetcher:
+        tasks.append(reddit_fetcher.fetch(stock.ticker))
+        labels.append("reddit")
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     results: dict[str, FetchResult[Any]] = {}
@@ -253,7 +284,11 @@ async def _process_stock(
     analyst: AnalystSnapshot | None = _data(results.get("analyst"))
     earnings: EarningsSnapshot | None = _data(results.get("earnings"))
     insider: InsiderSnapshot | None = _data(results.get("insider"))
-    social: SocialSnapshot | None = None  # social fetchers added in Day 2+
+    social: SocialSnapshot | None = _build_social(
+        stocktwits=_data(results.get("stocktwits")),
+        apewisdom=_data(results.get("apewisdom")),
+        reddit=_data(results.get("reddit")),
+    )
 
     # FinBERT-score articles in place.
     if sentiment_processor and articles:
@@ -261,6 +296,20 @@ async def _process_stock(
             await sentiment_processor.score(articles)
         except Exception as e:  # noqa: BLE001
             log.warning("sentiment_failed ticker=%s err=%s", stock.ticker, e)
+
+    # Llama-3 summarization for the top 3 articles by absolute sentiment.
+    # We only summarize the ones we'll actually display — keeps inference cost down.
+    if summarizer and articles:
+        top_for_summary = sorted(
+            [a for a in articles if a.sentiment is not None],
+            key=lambda a: abs(a.sentiment or 0),
+            reverse=True,
+        )[:3]
+        if top_for_summary:
+            try:
+                await summarizer.summarize(top_for_summary)
+            except Exception as e:  # noqa: BLE001
+                log.warning("summarizer_failed ticker=%s err=%s", stock.ticker, e)
 
     sentiment_value, article_count = aggregate_sentiment(articles)
     sources_agree, sources_total = cross_source_agreement(articles)
@@ -338,6 +387,34 @@ async def _process_stock(
             latency_ms=result.latency_ms,
             error_detail=result.error,
         )
+
+
+def _build_social(
+    *,
+    stocktwits: dict | None,
+    apewisdom: dict | None,
+    reddit: dict | None,
+) -> SocialSnapshot | None:
+    """Coalesce raw fetcher outputs into a SocialSnapshot. Returns None if all empty."""
+    if not stocktwits and not apewisdom and not reddit:
+        return None
+
+    # Prefer Reddit's full-context delta if available; fall back to ApeWisdom's
+    # 24h cache delta which is also reliable for WSB-heavy tickers.
+    reddit_count = (reddit or {}).get("count_24h")
+    reddit_delta = (reddit or {}).get("delta_pct")
+    if reddit_delta is None:
+        reddit_count = (apewisdom or {}).get("mentions")
+        reddit_delta = (apewisdom or {}).get("delta_pct")
+
+    return SocialSnapshot(
+        reddit_mention_count=reddit_count,
+        reddit_mention_delta=reddit_delta,
+        apewisdom_rank=(apewisdom or {}).get("rank"),
+        stocktwits_bullish=(stocktwits or {}).get("bullish_pct"),
+        stocktwits_messages=(stocktwits or {}).get("message_count"),
+        google_trend_score=None,  # not yet wired
+    )
 
 
 def _data(result: FetchResult[Any] | None) -> Any:
