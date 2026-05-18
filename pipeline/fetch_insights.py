@@ -307,7 +307,7 @@ async def _process_stock(
         )[:3]
         if top_for_summary:
             try:
-                await summarizer.summarize(top_for_summary)
+                await summarizer.summarize(top_for_summary, ticker=stock.ticker)
             except Exception as e:  # noqa: BLE001
                 log.warning("summarizer_failed ticker=%s err=%s", stock.ticker, e)
 
@@ -371,6 +371,8 @@ async def _process_stock(
                     "published_at": a.published_at.isoformat() if a.published_at else None,
                     "sentiment": a.sentiment,
                     "tldr": a.tldr,
+                    "summary": a.summary,
+                    "signal_influence": a.signal_influence,
                     "display_rank": i + 1,
                 }
                 for i, a in enumerate(top_articles)

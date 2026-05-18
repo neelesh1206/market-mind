@@ -27,14 +27,16 @@ class PriceSnapshot:
 
 @dataclass
 class NewsArticle:
-    """Single news item with sentiment + summary populated downstream."""
+    """Single news item — sentiment + summary fields populated downstream."""
     headline: str
     url: str
     source: str
     published_at: datetime | None
     body: str | None = None
-    sentiment: float | None = None       # set by FinBERT processor
-    tldr: str | None = None              # set by Llama-3 processor
+    sentiment: float | None = None              # set by FinBERT processor
+    tldr: str | None = None                     # one sentence, < 140 chars, for card glance
+    summary: str | None = None                  # 2-3 sentences, paragraph
+    signal_influence: str | None = None         # one sentence: how this affects sentiment direction
 
 
 @dataclass
