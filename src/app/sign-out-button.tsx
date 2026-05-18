@@ -18,7 +18,7 @@ export function SignOutButton() {
   }
 
   return (
-    <Button onClick={signOut} disabled={loading} variant="outline">
+    <Button onClick={signOut} disabled={loading} variant="ghost" size="sm" aria-label="Sign out">
       {loading ? "Signing out…" : "Sign out"}
     </Button>
   );
