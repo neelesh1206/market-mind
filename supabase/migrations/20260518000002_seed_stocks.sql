@@ -1,6 +1,8 @@
 -- ============================================================================
--- MarketMind seed: 50 curated stocks across sectors
--- Run AFTER initial schema migration.
+-- Seed: 50 curated stocks across sectors.
+-- Idempotent via `on conflict (ticker) do nothing` — safe to re-apply.
+-- Local dev: `supabase db reset` applies this as part of the migration chain.
+-- Prod: applied via the apply-migrations workflow.
 -- ============================================================================
 
 insert into public.stocks (ticker, name, sector, sub_sector, market_cap_tier) values

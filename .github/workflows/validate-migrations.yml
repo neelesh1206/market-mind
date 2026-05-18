@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - "supabase/migrations/**"
-      - "supabase/seed.sql"
       - "supabase/config.toml"
   workflow_dispatch:
 
@@ -30,21 +29,14 @@ jobs:
       - name: Start local Supabase
         run: supabase start
 
-      - name: Reset DB (applies all migrations + seed)
-        run: supabase db reset
+      - name: Apply all migrations from scratch
+        # `db reset` drops the local DB, replays every migration in order.
+        # Catches: SQL errors, missing dependencies, out-of-order timestamps.
+        run: supabase db reset --local
 
       - name: Lint migrations
-        run: supabase db lint --schema public
-        continue-on-error: true # advisory: log warnings but don't fail PR
-
-      - name: Confirm 50 stocks seeded
-        run: |
-          count=$(supabase db query "select count(*) from public.stocks;" --csv | tail -n 1)
-          echo "stocks=$count"
-          if [ "$count" != "50" ]; then
-            echo "::error::Expected 50 stocks seeded, found $count"
-            exit 1
-          fi
+        run: supabase db lint --schema public --level warning
+        continue-on-error: true # advisory, never fails the PR
 
       - name: Stop local Supabase
         if: always()

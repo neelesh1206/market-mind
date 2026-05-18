@@ -24,8 +24,10 @@ See [ADR 0006](adr/0006-migrations-via-github-actions.md) for the design.
 2. Go to **GitHub → Actions → "Apply Migrations to Production"**.
 3. Click **Run workflow**.
 4. Type `migrate` in the confirmation input. Any other value aborts.
-5. Optionally check **Also run supabase/seed.sql** — usually unchecked, only true for the initial bootstrap.
-6. Watch the dry-run output before the apply step. If anything looks wrong, cancel the workflow.
+5. Watch the dry-run output before the apply step. If anything looks wrong, cancel the workflow.
+
+> **Seed data** lives inside the migration chain (idempotent via `ON CONFLICT DO NOTHING`).
+> There's no separate seed step — `supabase db push` applies it.
 
 **Rolling back:**
 There's no automated rollback. To revert:

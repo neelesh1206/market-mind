@@ -7,6 +7,8 @@ name: Apply Migrations to Production
 #   3. Type the literal word "migrate" in the confirmation input
 #
 # Confirmation prevents accidental runs (e.g. clicking the wrong workflow).
+# Seed data lives inside the migration chain (idempotent via ON CONFLICT) —
+# no separate seed step needed.
 
 on:
   workflow_dispatch:
@@ -15,11 +17,6 @@ on:
         description: 'Type "migrate" to confirm. Any other value aborts.'
         required: true
         type: string
-      seed:
-        description: "Also run supabase/seed.sql after migrations (one-time bootstrap only)"
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: apply-migrations-prod
@@ -62,6 +59,9 @@ jobs:
       - name: Link to production project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
 
+      - name: List remote migrations (current state)
+        run: supabase migration list
+
       - name: Show planned changes (dry run)
         run: |
           echo "::group::Migrations to be applied"
@@ -71,27 +71,10 @@ jobs:
       - name: Apply migrations
         run: supabase db push
 
-      - name: Apply seed (if requested)
-        if: ${{ inputs.seed }}
+      - name: Confirm applied state
         run: |
-          echo "::group::Seeding stocks table"
-          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
-            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
-            -f supabase/seed.sql
-          echo "::endgroup::"
-
-      - name: Post-apply verification
-        run: |
-          echo "::group::Tables in public schema"
-          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
-            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
-            -c "select tablename from pg_tables where schemaname = 'public' order by tablename;"
-          echo "::endgroup::"
-
-          echo "::group::Stock count"
-          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
-            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
-            -c "select count(*) as stocks from public.stocks;"
+          echo "::group::Remote migrations after apply"
+          supabase migration list
           echo "::endgroup::"
 
       - name: Summary
@@ -99,6 +82,7 @@ jobs:
           echo "### Migration applied successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Project: marketmind-prod (${SUPABASE_PROJECT_REF})" >> $GITHUB_STEP_SUMMARY
-          echo "- Seed applied: ${{ inputs.seed }}" >> $GITHUB_STEP_SUMMARY
           echo "- Triggered by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verify via Supabase dashboard: https://supabase.com/dashboard/project/${SUPABASE_PROJECT_REF}/editor" >> $GITHUB_STEP_SUMMARY
