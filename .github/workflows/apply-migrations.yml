@@ -1,0 +1,104 @@
+name: Apply Migrations to Production
+
+# CRITICAL: this is the only workflow that touches the prod schema.
+# It never triggers automatically. The user must:
+#   1. Open Actions → "Apply Migrations to Production"
+#   2. Click "Run workflow"
+#   3. Type the literal word "migrate" in the confirmation input
+#
+# Confirmation prevents accidental runs (e.g. clicking the wrong workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "migrate" to confirm. Any other value aborts.'
+        required: true
+        type: string
+      seed:
+        description: "Also run supabase/seed.sql after migrations (one-time bootstrap only)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: apply-migrations-prod
+  cancel-in-progress: false # never cancel a migration mid-flight
+
+jobs:
+  guard:
+    name: Confirmation gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation
+        run: |
+          if [ "${{ inputs.confirmation }}" != "migrate" ]; then
+            echo "::error::Confirmation must be the literal string 'migrate' (got: '${{ inputs.confirmation }}')"
+            exit 1
+          fi
+          echo "Confirmation accepted. Proceeding with migration."
+
+  apply:
+    name: Apply to marketmind-prod
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production # add required reviewers via repo settings if desired
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link to production project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Show planned changes (dry run)
+        run: |
+          echo "::group::Migrations to be applied"
+          supabase db push --dry-run
+          echo "::endgroup::"
+
+      - name: Apply migrations
+        run: supabase db push
+
+      - name: Apply seed (if requested)
+        if: ${{ inputs.seed }}
+        run: |
+          echo "::group::Seeding stocks table"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
+            -f supabase/seed.sql
+          echo "::endgroup::"
+
+      - name: Post-apply verification
+        run: |
+          echo "::group::Tables in public schema"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
+            -c "select tablename from pg_tables where schemaname = 'public' order by tablename;"
+          echo "::endgroup::"
+
+          echo "::group::Stock count"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "postgresql://postgres.${SUPABASE_PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-1.pooler.supabase.com:5432/postgres" \
+            -c "select count(*) as stocks from public.stocks;"
+          echo "::endgroup::"
+
+      - name: Summary
+        run: |
+          echo "### Migration applied successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Project: marketmind-prod (${SUPABASE_PROJECT_REF})" >> $GITHUB_STEP_SUMMARY
+          echo "- Seed applied: ${{ inputs.seed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

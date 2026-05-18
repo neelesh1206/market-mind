@@ -23,16 +23,59 @@ cd market-mind
 npm install
 ```
 
-### 2. Supabase project
+### 2. Supabase — production project (one-time)
 
-1. Create new project at [supabase.com](https://supabase.com) → name: `marketmind-dev`
+1. Create new project at [supabase.com](https://supabase.com) → name: `marketmind-prod`
 2. Wait for project provisioning (~2 min)
-3. Database → SQL Editor → paste contents of `supabase/migrations/*.sql` in order
-4. Authentication → Providers → enable Google → set redirect URLs:
+3. **Do not apply migrations via SQL Editor.** Production schema changes go through the [Apply Migrations workflow](#applying-migrations-to-production) ([ADR 0006](adr/0006-migrations-via-github-actions.md))
+4. Authentication → Providers → enable Google
+5. Authentication → URL Configuration → add redirect URLs:
    - `http://localhost:3000/auth/callback`
    - `https://marketmind.neeleshkakaraparthi.dev/auth/callback` (prod)
-5. Run seed: `psql $DATABASE_URL < supabase/seed.sql` (seeds 50 stocks)
-6. Generate types: `npx supabase gen types typescript --project-id <id> > types/database.ts`
+
+### 3. Supabase — local dev (per developer)
+
+Install the Supabase CLI:
+
+```bash
+# macOS via Homebrew
+brew install supabase/tap/supabase
+
+# OR via npm (no global install needed)
+npx supabase --version
+```
+
+Start a local Supabase stack (Postgres + Auth + Storage in Docker):
+
+```bash
+cd supabase
+supabase start          # spins up Docker containers
+supabase db reset       # applies all migrations + seed
+```
+
+Endpoint URLs printed by `supabase start` go into a local `.env.local`. The local stack runs alongside the prod project — they're independent.
+
+### 4. Generate TypeScript types from prod schema
+
+```bash
+npx supabase gen types typescript --project-id cqbdjiphrrdwmbrqoeeh > src/types/database.ts
+```
+
+Commit the generated file. Re-run whenever the schema changes.
+
+### 5. Applying migrations to production
+
+**Never edit prod schema by hand.** Use the workflow:
+
+1. Add your new migration file under `supabase/migrations/` (timestamped name)
+2. Open a PR — the [`validate-migrations`](.github/workflows/validate-migrations.yml) action runs automatically against a clean local Supabase stack
+3. Merge the PR
+4. Go to **Actions → "Apply Migrations to Production" → Run workflow**
+5. Type the literal string `migrate` in the confirmation input
+6. Watch the dry-run logs in the workflow output
+7. The workflow applies, then runs a post-verification query
+
+If something looks wrong in the dry-run, cancel the workflow before the apply step.
 
 ### 3. Environment variables
 
@@ -165,6 +208,16 @@ Propagation: 5–30 min. Vercel handles SSL automatically.
 
 ### GitHub Actions secrets
 Settings → Secrets and variables → Actions → add all pipeline env vars.
+
+### Migration secrets (one-time)
+
+For [`apply-migrations.yml`](.github/workflows/apply-migrations.yml) to work, add:
+
+| Secret | Where to get it |
+|--------|-----------------|
+| `SUPABASE_ACCESS_TOKEN` | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) → Generate new token (name it `marketmind-cicd`) |
+| `SUPABASE_DB_PASSWORD` | The DB password you saved when creating `marketmind-prod` (if lost, reset under Project Settings → Database) |
+| `SUPABASE_PROJECT_REF` | The project ref from your Supabase URL (`cqbdjiphrrdwmbrqoeeh`) |
 
 ---
 

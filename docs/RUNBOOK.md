@@ -6,6 +6,33 @@ Operational procedures for MarketMind. Use when something goes wrong or needs ma
 
 ## Common operations
 
+### Applying a new database migration
+
+See [ADR 0006](adr/0006-migrations-via-github-actions.md) for the design.
+
+**Authoring:**
+1. Create a new file under `supabase/migrations/` with the naming convention `YYYYMMDDHHMMSS_short_description.sql`
+2. Test locally:
+   ```bash
+   cd supabase
+   supabase db reset       # applies all migrations from scratch
+   ```
+3. Open a PR. The `validate-migrations` workflow runs automatically.
+
+**Applying to production:**
+1. Merge the PR.
+2. Go to **GitHub → Actions → "Apply Migrations to Production"**.
+3. Click **Run workflow**.
+4. Type `migrate` in the confirmation input. Any other value aborts.
+5. Optionally check **Also run supabase/seed.sql** — usually unchecked, only true for the initial bootstrap.
+6. Watch the dry-run output before the apply step. If anything looks wrong, cancel the workflow.
+
+**Rolling back:**
+There's no automated rollback. To revert:
+1. Write a new "down" migration that explicitly reverses the change
+2. Apply via the same workflow
+3. Never edit or delete a migration file that has already been applied to prod
+
 ### Re-run the insights pipeline for a specific date
 
 Useful when the nightly cron failed or you want to backfill.

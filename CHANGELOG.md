@@ -10,6 +10,11 @@ For deeper context on any decision, see corresponding ADR in [docs/adr/](docs/ad
 
 ## 2026-05-18
 
+- **ci-migrations** — Enterprise-grade migration pipeline. Two workflows: `validate-migrations.yml` runs on PR (spins up local Supabase, applies all migrations, verifies seed). `apply-migrations.yml` is manual-only via `workflow_dispatch`, requires typing literal `migrate` confirmation, runs dry-run before apply, verifies post-state. Added `supabase/config.toml` for CLI + ADR 0006 documenting the design. Docs updated in SETUP + RUNBOOK.
+- **auth-flow** — Supabase auth integration via `@supabase/ssr`. Browser + server clients (`src/lib/supabase/{client,server}.ts`), session-refresh proxy at `src/proxy.ts` (Next.js 16 file convention — formerly `middleware.ts`), OAuth callback at `src/app/auth/callback/route.ts`, Google Sign-In login page at `/login` with Suspense-wrapped form, auth-gated home at `/` showing email + credit balance + streak. Sign-out button as a client component.
+- **next16-pipeline-pattern** — Discovered Next.js 16 renamed `middleware.ts` → `proxy.ts` (the function is `proxy()` not `middleware()`). Documented in code comments; no ADR since it's a forced convention.
+- **schema-applied** *(pending user confirmation)* — Initial migration + seed expected to be applied to `marketmind-prod` Supabase project via SQL Editor.
+- **deps-supabase** — Installed `@supabase/supabase-js`, `@supabase/ssr`.
 - **project-scaffold** — Initialized Next.js 16.2.6 + React 19 + Tailwind v4 + TypeScript strict via `create-next-app`. Source dir is `src/`, App Router enabled, import alias `@/*`.
 - **dev-tooling** — Configured TypeScript strict mode with `noUncheckedIndexedAccess`, `noFallthroughCasesInSwitch`, `noImplicitOverride`. Added Prettier (with `prettier-plugin-tailwindcss`), Vitest + Testing Library. npm scripts: `lint`, `format`, `format:check`, `test`, `test:run`, `typecheck`.
 - **shadcn-init** — Initialized shadcn/ui with neutral base color, CSS variables enabled, base components library. Default Button component generated as a smoke test.
