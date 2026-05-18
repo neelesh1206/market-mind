@@ -28,10 +28,10 @@ npm install
 1. Create new project at [supabase.com](https://supabase.com) → name: `marketmind-prod`
 2. Wait for project provisioning (~2 min)
 3. **Do not apply migrations via SQL Editor.** Production schema changes go through the [Apply Migrations workflow](#applying-migrations-to-production) ([ADR 0006](adr/0006-migrations-via-github-actions.md))
-4. Authentication → Providers → enable Google
-5. Authentication → URL Configuration → add redirect URLs:
-   - `http://localhost:3000/auth/callback`
-   - `https://marketmind.neeleshkakaraparthi.dev/auth/callback` (prod)
+4. Authentication → URL Configuration:
+   - Site URL: `http://localhost:3000`
+   - Redirect URLs: add `http://localhost:3000/auth/callback` and `https://marketmind.neeleshkakaraparthi.dev/auth/callback`
+5. Authentication → Providers → enable Google (requires Google OAuth credentials — see [Google OAuth setup](#google-oauth-setup) below)
 
 ### 3. Supabase — local dev (per developer)
 
@@ -143,6 +143,36 @@ python resolve_predictions.py
 ---
 
 ## Third-party account setup
+
+### Google OAuth setup
+
+Supabase deprecated its shared OAuth client in late 2024 — every project now needs its own Google credentials. This is a one-time setup.
+
+1. **Create a project** in [Google Cloud Console](https://console.cloud.google.com): top-left dropdown → New Project → name `marketmind` → Create. Select it once created.
+2. **OAuth consent screen** (APIs & Services → OAuth consent screen):
+   - User Type: External
+   - App name: `MarketMind`
+   - User support email + Developer contact: your Gmail
+   - Scopes: skip (defaults are correct — `email`, `profile`, `openid`)
+   - Test users: add your email + any friends who'll sign in while in Testing mode
+3. **OAuth Client ID** (APIs & Services → Credentials → Create Credentials → OAuth client ID):
+   - Application type: Web application
+   - Name: `MarketMind Web Client`
+   - Authorized JavaScript origins:
+     - `http://localhost:3000`
+     - `https://marketmind.neeleshkakaraparthi.dev`
+   - Authorized redirect URIs:
+     - `https://cqbdjiphrrdwmbrqoeeh.supabase.co/auth/v1/callback` (Supabase project URL + `/auth/v1/callback`)
+4. **Copy Client ID + Secret** from the modal that pops up
+5. **Wire into Supabase** (Authentication → Providers → Google):
+   - Toggle ON
+   - Paste Client ID + Secret
+   - Save
+
+> **Testing vs Production mode.** While the consent screen is in Testing mode (default), only listed test users can sign in. For MVP this is fine. Promoting to Production only requires Google verification for sensitive scopes — `email/profile/openid` don't need it, but Google still recommends it eventually.
+
+### Optional: magic-link email as backup
+Auth → Providers → Email → enable Magic Link. Lets you sign in without configuring Google for new test users.
 
 ### Massive (formerly Polygon.io)
 1. Sign up at [massive.com](https://massive.com)
