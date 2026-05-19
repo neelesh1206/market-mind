@@ -502,6 +502,24 @@ def _commit_resolution(
         "correct_predictions": new_correct,
     }).eq("id", user_id).execute()
 
+    # 5. Badge awards. Idempotent — the RPC is ON CONFLICT DO NOTHING so
+    # re-runs after a partial failure are safe. We only fire on the
+    # cheap state transitions we can detect locally; streak badges are
+    # awarded inside claim_daily_bonus where the streak math lives.
+    if outcome == "WIN" and new_correct == 1:
+        try:
+            supabase.rpc(
+                "award_badge",
+                {
+                    "p_user_id": user_id,
+                    "p_badge_type": "FIRST_WIN",
+                    "p_metadata": {"prediction_id": pred_id},
+                },
+            ).execute()
+        except Exception as e:
+            # Don't fail resolution if badge insert hiccups. Log and move on.
+            log.warning("award_badge FIRST_WIN failed: %s", e)
+
     log.info("resolved id=%s outcome=%s payout=%s", pred_id, outcome, payout)
 
 

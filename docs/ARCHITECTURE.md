@@ -94,12 +94,16 @@ High-level technical architecture for MarketMind. For implementation details, se
 9:30 AM            Market opens — open_price captured by resolution job later
 4:00 PM            Market closes
 4:15 PM            resolve-predictions job runs:
-                     - for each unresolved prediction:
-                         compare open_price → close_price
+                     - for each unresolved user prediction:
+                         compare open_price → close_price  (matches bet-lock at 1 PM ET)
                          set outcome = WIN/LOSS
                          credit payout if WIN (1.8x stake)
                          log to credit_transactions
                          award any newly-unlocked badges
+                     - for each unresolved MarketMind verdict (track record):
+                         compare prev_close → close_price  (matches 8 PM T-1 prediction time)
+                         set outcome = WIN/LOSS/VOID
+                     (Two windows — see ADR 0011)
 4:16 PM            User opens app → result reveal animation fires
 ```
 
@@ -163,3 +167,4 @@ For the reasoning behind each design choice, see the ADRs:
 | [0003](adr/0003-no-aggregate-verdict.md) | No UP/DOWN verdict — show signals, not conclusions |
 | [0004](adr/0004-github-actions-for-pipeline.md) | GitHub Actions over FastAPI/Modal for the pipeline |
 | [0005](adr/0005-massive-as-primary-data-source.md) | Massive as primary paid data source |
+| [0011](adr/0011-signal-quality-p0-fixes.md) | Signal-quality P0 fixes (resolution window, PIT filter, weight renormalization) |

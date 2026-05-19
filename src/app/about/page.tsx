@@ -227,10 +227,15 @@ export default async function AboutPage() {
             Each day the four bucket scores get combined into a single weighted score:
           </p>
           <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs leading-relaxed">
-            {`combined = 0.30 * technical
-         + 0.25 * sentiment
-         + 0.30 * professional
-         + 0.15 * social
+            {`# Per-bucket weights
+w = { technical: 0.30, sentiment: 0.25,
+      professional: 0.30, social: 0.15 }
+
+# Only buckets with actual data contribute.
+# Missing buckets are EXCLUDED and weights renormalize over the rest —
+# absence of evidence is not evidence of zero.
+present   = { k: v for k, v in buckets if v is not None }
+combined  = Σ(present[k] * w[k]) / Σ(w[k] for k in present)
 
 direction = "UP"      if combined >  0.15
           | "DOWN"    if combined < -0.15
@@ -243,6 +248,20 @@ confidence = min(|combined|, 1.0)`}
             weights are an initial heuristic; as track-record data accumulates, we tune them based
             on what combinations correlate with WIN outcomes (versioned so accuracy maps to specific
             weight cohorts).
+          </p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            The renormalization step matters for less-covered tickers. If we have a strong technical
+            read but no analyst coverage, the technical bucket carries the call on its own instead
+            of getting diluted toward zero by the missing professional input.{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0011-signal-quality-p0-fixes.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0011 <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            covers the math.
           </p>
           <p className="text-muted-foreground text-sm leading-relaxed">
             <a
@@ -474,8 +493,20 @@ otherwise             →  NEUTRAL`}
             </li>
             <li>
               <span className="text-foreground font-mono">4:15 PM ET</span> — resolution job runs.
-              Outcome per stock is{" "}
-              <span className="text-foreground font-mono">sign(close − open)</span>.
+              Two scoring windows depending on what&apos;s being resolved:
+              <ul className="text-muted-foreground mt-1.5 ml-5 list-disc space-y-1 text-sm leading-relaxed">
+                <li>
+                  <span className="text-foreground">MarketMind&apos;s daily verdict</span> is scored{" "}
+                  <span className="text-foreground font-mono">sign(close − prev_close)</span> — the
+                  window matches when the call was made (8 PM the night before), so the overnight
+                  gap is part of the prediction.
+                </li>
+                <li>
+                  <span className="text-foreground">User bets</span> are scored{" "}
+                  <span className="text-foreground font-mono">sign(close − open)</span> — the window
+                  matches the latest time a bet could be placed (1 PM ET).
+                </li>
+              </ul>
             </li>
           </ul>
           <p className="text-muted-foreground text-sm leading-relaxed">
@@ -487,9 +518,20 @@ otherwise             →  NEUTRAL`}
               rel="noopener noreferrer"
               className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
             >
-              ADR 0008 <ExternalLink className="h-3 w-3" aria-hidden />
+              ADR 0008
+              <ExternalLink className="h-3 w-3" aria-hidden />
             </a>{" "}
-            for the reasoning behind the extended bet window.
+            for the reasoning behind the extended bet window, and{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0011-signal-quality-p0-fixes.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0011
+              <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            for why the two resolution paths use different windows.
           </p>
         </section>
 

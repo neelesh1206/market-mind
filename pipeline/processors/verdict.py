@@ -12,8 +12,9 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
+# huggingface_hub is only needed by VerdictReasoner; importing it lazily
+# inside that class keeps `compute_verdict` (the pure-math entry point)
+# importable in test environments that don't install the ML deps.
 
 log = logging.getLogger("marketmind.verdict")
 
@@ -125,6 +126,8 @@ class VerdictReasoner:
     def __init__(self, api_key: str, model: str, provider: str | None = None) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
+        from huggingface_hub import InferenceClient
+
         # 90s timeout matches the other HF callsites — provider-routed
         # cold starts can take 30-60s on first hit.
         kwargs: dict[str, object] = {"model": model, "token": api_key, "timeout": 90}
@@ -143,6 +146,8 @@ class VerdictReasoner:
             prof=fmt(scores["professional"]),
             soc=fmt(scores["social"]),
         )
+
+        from huggingface_hub.errors import HfHubHTTPError
 
         try:
             response = self._client.chat_completion(

@@ -54,6 +54,24 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: badges v1
+
+`supabase/migrations/20260519000007_badges.sql` extends `place_bet` to
+award FIRST_BET, extends `claim_daily_bonus` to award STREAK_N, and
+adds a service-role-only `award_badge(uuid, text, jsonb)` RPC used by
+the resolution job.
+
+Apply via the standard workflow. Smoke-test:
+
+1. Place your first bet → reload `/profile` → **First Bet** lights up.
+2. Resolve a WIN (manually run `python pipeline/resolve_predictions.py
+   --date YYYY-MM-DD` for a day you bet) → `/profile` shows **First
+   Win** earned.
+3. Claim the daily bonus 3 days in a row (or seed `last_login_date` to
+   yesterday in SQL) → **3-Day Streak** appears.
+4. Verify in SQL: `select badge_type, earned_at from user_badges where
+   user_id = '...'` shows all earned badges, no duplicates.
+
 ### Pending migration: result reveals (revealed_at column + RPC)
 
 Migration `supabase/migrations/20260519000006_revealed_at.sql` adds

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { History, LogOut, Settings } from "lucide-react";
+import { History, LogOut, Settings, User } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +61,17 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
         </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={() => {
+            setOpen(false);
+            router.push("/profile");
+          }}
+          className="cursor-pointer"
+        >
+          <User className="h-4 w-4" />
+          <span>Profile &amp; badges</span>
+        </DropdownMenuItem>
 
         <DropdownMenuItem
           onClick={() => {

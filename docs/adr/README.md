@@ -20,6 +20,7 @@ Format follows [Michael Nygard's ADR pattern](https://cognitect.com/blog/2011/11
 | [0008](0008-bet-window-into-market-hours.md) | Bet window extends into market hours (locks 1 PM ET) | Accepted |
 | [0009](0009-bet-placement-atomicity.md) | Bet placement runs as a Postgres RPC (atomic + concurrency-safe) | Accepted |
 | [0010](0010-postgres-over-redis-for-seen-state.md) | Postgres column over Redis for "seen reveal" state | Accepted |
+| [0011](0011-signal-quality-p0-fixes.md) | Signal-quality P0 fixes (resolution window, PIT filter, weight renormalization) | Accepted |
 
 ---
 
