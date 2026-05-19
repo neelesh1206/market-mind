@@ -33,23 +33,32 @@ class FinBertSentimentProcessor:
     def __init__(self, api_key: str, *, max_chars: int = 800) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
-        # 60s leaves headroom for FinBERT cold starts on hf-inference. The
-        # serverless model can take 10-30s to load on first hit per region;
-        # subsequent calls are <1s.
-        self._client = InferenceClient(model=MODEL, token=api_key, timeout=60)
+        # 90s leaves headroom for FinBERT cold starts + HF router latency.
+        # The serverless model can take 10-30s to load on first hit per
+        # region; the router itself adds another 5-15s when routing to a
+        # paid provider; subsequent warm calls are <1s.
+        self._client = InferenceClient(model=MODEL, token=api_key, timeout=90)
         self.max_chars = max_chars
 
     async def score(self, articles: list[NewsArticle]) -> None:
-        """Populate `article.sentiment` for each input."""
+        """Populate `article.sentiment` for each input.
+
+        We process in batches of 3 rather than all-at-once because firing
+        all-N article calls in parallel saturates the HF router and we
+        see timeout errors on the tail. Batches of 3 keep us under the
+        router's per-second cap while still finishing a 10-article batch
+        in ~10s.
+        """
         if not articles:
             return
 
-        # text_classification is synchronous on the client; offload each call to a thread
-        # so we can parallelize. Default thread pool is fine for this volume.
-        await asyncio.gather(
-            *(asyncio.to_thread(self._score_one, a) for a in articles),
-            return_exceptions=True,
-        )
+        BATCH = 3
+        for start in range(0, len(articles), BATCH):
+            chunk = articles[start : start + BATCH]
+            await asyncio.gather(
+                *(asyncio.to_thread(self._score_one, a) for a in chunk),
+                return_exceptions=True,
+            )
 
     def _score_one(self, article: NewsArticle) -> None:
         text = self._truncate(article.body or article.headline)

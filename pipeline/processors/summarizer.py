@@ -80,10 +80,12 @@ class LlamaSummarizer:
         #   lands on `hf-inference` so nothing changes.
         # An explicit override is available for advanced users.
         provider = os.getenv("HUGGINGFACE_PROVIDER", "auto")
+        # 90s timeout absorbs HF router + provider-routing latency on
+        # cold starts (30-60s on first hit). Warm calls return in 2-5s.
         client_kwargs: dict[str, object] = {
             "model": self.model,
             "token": api_key,
-            "timeout": 45,
+            "timeout": 90,
         }
         if provider != "auto":
             client_kwargs["provider"] = provider
@@ -93,12 +95,18 @@ class LlamaSummarizer:
         log.info("summarizer_init model=%s provider=%s", self.model, provider)
 
     async def summarize(self, articles: list[NewsArticle], *, ticker: str) -> None:
+        """Summarize articles in batches of 3 to avoid saturating the HF
+        router. Top-articles list is typically 3 long anyway, so this is
+        mostly a guard against future expansion."""
         if not articles:
             return
-        await asyncio.gather(
-            *(asyncio.to_thread(self._summarize_one, a, ticker) for a in articles),
-            return_exceptions=True,
-        )
+        BATCH = 3
+        for start in range(0, len(articles), BATCH):
+            chunk = articles[start : start + BATCH]
+            await asyncio.gather(
+                *(asyncio.to_thread(self._summarize_one, a, ticker) for a in chunk),
+                return_exceptions=True,
+            )
 
     def _summarize_one(self, article: NewsArticle, ticker: str) -> None:
         body = (article.body or "")[: self.max_body_chars]

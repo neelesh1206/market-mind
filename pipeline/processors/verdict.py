@@ -115,7 +115,9 @@ class VerdictReasoner:
     def __init__(self, api_key: str, model: str, provider: str | None = None) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
-        kwargs: dict[str, object] = {"model": model, "token": api_key, "timeout": 30}
+        # 90s timeout matches the other HF callsites — provider-routed
+        # cold starts can take 30-60s on first hit.
+        kwargs: dict[str, object] = {"model": model, "token": api_key, "timeout": 90}
         if provider and provider != "auto":
             kwargs["provider"] = provider
         self._client = InferenceClient(**kwargs)  # type: ignore[arg-type]
