@@ -48,6 +48,7 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup walkthrough including:
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | High-level architecture, diagrams, data flow |
 | [docs/CASE_STUDY.md](docs/CASE_STUDY.md) | Portfolio narrative — design choices, tradeoffs, lessons |
 | [docs/SETUP.md](docs/SETUP.md) | Manual setup steps, env vars, third-party config |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Vercel deploy walkthrough, env vars, OAuth wiring, smoke checklist |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Ops procedures: re-run pipeline, debug failures, rotate keys |
 | [docs/adr/](docs/adr/) | Architecture Decision Records — one decision per file |
 

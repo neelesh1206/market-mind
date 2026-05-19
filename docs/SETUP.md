@@ -220,22 +220,14 @@ Auth → Providers → Email → enable Magic Link. Lets you sign in without con
 
 ## Deployment
 
-### Vercel
-1. Import GitHub repo
-2. Framework: Next.js (auto-detected)
-3. Environment variables → paste all `NEXT_PUBLIC_*` and Redis vars
-4. Deploy
-5. Settings → Domains → add `marketmind.neeleshkakaraparthi.dev`
-6. Vercel shows CNAME target → add to DNS provider
+Full walkthrough lives in [DEPLOYMENT.md](DEPLOYMENT.md) — Vercel project
+creation, env-var matrix, Supabase + Google OAuth redirect wiring,
+post-deploy smoke checklist, rollback procedure.
 
-### DNS (where neeleshkakaraparthi.dev is registered)
-```
-Type:   CNAME
-Name:   marketmind
-Value:  cname.vercel-dns.com
-Proxy:  DNS only (orange cloud OFF for Cloudflare)
-```
-Propagation: 5–30 min. Vercel handles SSL automatically.
+TL;DR if you've already deployed before:
+1. Push to `main` → Vercel auto-deploys
+2. PR → Vercel comments with a preview URL
+3. Env-var changes → set in Vercel dashboard, redeploy
 
 ### GitHub Actions secrets
 Settings → Secrets and variables → Actions → add all pipeline env vars.
