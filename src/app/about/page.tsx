@@ -452,8 +452,8 @@ otherwise             →  NEUTRAL`}
           <h2 className="text-2xl font-semibold">Update cadence</h2>
           <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
             <li>
-              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline kicks off
-              the night before. Crunching ~50 stocks (news, social, technicals, FinBERT, Llama
+              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline kicks off the
+              night before. Crunching ~50 stocks (news, social, technicals, FinBERT, Llama
               summaries) typically takes 15–25 minutes.
             </li>
             <li>

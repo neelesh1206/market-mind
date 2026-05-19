@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
+import { fetchBetsForTradingDay } from "@/lib/bets";
+import { getMarketSchedule } from "@/lib/market-schedule";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -26,10 +28,13 @@ export default async function Home() {
     redirect("/onboarding");
   }
 
-  // Fetch latest insights + top articles for the watchlist + track record
-  const [feedUnsorted, trackRecord] = await Promise.all([
+  // Fetch latest insights + top articles for the watchlist + track record +
+  // any bets the user already placed for the current trading day.
+  const schedule = getMarketSchedule();
+  const [feedUnsorted, trackRecord, betsByStockId] = await Promise.all([
     fetchHomeFeed(supabase, watchlist),
     fetchTrackRecord(supabase, 30),
+    fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
   ]);
   const feed = rankFeed(feedUnsorted);
 
@@ -132,7 +137,13 @@ export default async function Home() {
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {cardsWithInsight.map((card) => (
-                <StockCard key={card.stock.id} data={card} />
+                <StockCard
+                  key={card.stock.id}
+                  data={card}
+                  userBet={betsByStockId[card.stock.id] ?? null}
+                  userCredits={credits}
+                  schedule={schedule}
+                />
               ))}
             </div>
           </section>

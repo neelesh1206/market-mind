@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ArrowDown, ArrowUp, Calendar, TrendingUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowLeft, Calendar, TrendingUp } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileMenu } from "@/components/profile-menu";
 import { SignalDetail } from "@/components/signal-detail";
@@ -14,6 +13,9 @@ import { VerdictChip } from "@/components/verdict-chip";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
+import { fetchBetsForTradingDay } from "@/lib/bets";
+import { getMarketSchedule } from "@/lib/market-schedule";
+import { BetCta } from "@/components/bet-cta";
 import { cn } from "@/lib/utils";
 
 type Params = Promise<{ ticker: string }>;
@@ -35,7 +37,8 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
 
-  const [detail, watchlist, profileRes] = await Promise.all([
+  const schedule = getMarketSchedule();
+  const [detail, watchlist, profileRes, betsByStockId] = await Promise.all([
     fetchStockDetail(supabase, ticker),
     fetchUserWatchlist(supabase, userId),
     supabase
@@ -43,6 +46,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
       .select("display_name, credit_balance")
       .eq("id", userId)
       .maybeSingle(),
+    fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
   ]);
 
   if (!detail) {
@@ -53,6 +57,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const credits = profile?.credit_balance ?? 0;
   const name = profile?.display_name ?? email;
   const { stock, insight, articles, verdict } = detail;
+  const userBet = betsByStockId[stock.id] ?? null;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -357,28 +362,24 @@ export default async function StockDetailPage({ params }: { params: Params }) {
         {/* Bet CTAs */}
         <section className="border-border/60 bg-card/20 flex flex-wrap items-center justify-between gap-4 rounded-xl border p-5">
           <div className="space-y-0.5">
-            <p className="text-sm font-medium">Your prediction</p>
+            <p className="text-sm font-medium">
+              {userBet ? "Your bet for today" : "Your prediction"}
+            </p>
             <p className="text-muted-foreground text-xs">
-              Bet window opens at 8 PM ET, locks at 9:15 AM the next morning.
+              Bet window: 8 PM ET → 1 PM ET next trading day. Resolves at 4:15 PM ET.
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              size="lg"
-              disabled
-              className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-600/90"
-            >
-              <ArrowUp className="h-4 w-4" /> UP
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              disabled
-              className="gap-1.5 border-red-500/50 text-red-500 hover:bg-red-500/10"
-            >
-              <ArrowDown className="h-4 w-4" /> DOWN
-            </Button>
-          </div>
+          <BetCta
+            stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
+            verdict={verdict}
+            userBet={userBet}
+            userCredits={credits}
+            betWindowOpen={schedule.betWindowOpen}
+            betWindowClosesAt={schedule.betWindowClosesAt}
+            betWindowOpensAt={schedule.betWindowOpensAt}
+            resolutionAt={schedule.resolutionAt}
+            size="lg"
+          />
         </section>
 
         {/* Methodology link */}

@@ -124,9 +124,7 @@ export function MarketScheduleBar() {
             <RefreshCw className="h-3 w-3" aria-hidden />
             <span>Next insights refresh</span>
           </div>
-          <p className="text-sm font-semibold">
-            {formatRelative(schedule.nextPipelineCompletion)}
-          </p>
+          <p className="text-sm font-semibold">{formatRelative(schedule.nextPipelineCompletion)}</p>
           <p className="text-muted-foreground text-[11px]">
             Starts {formatET(schedule.nextPipelineRun)}, live by{" "}
             {formatET(schedule.nextPipelineCompletion)}

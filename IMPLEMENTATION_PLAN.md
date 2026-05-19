@@ -979,7 +979,7 @@ UPSTASH_REDIS_REST_TOKEN=
 | StockCard | 3h | Signal bars, source badges, article quote, freshness |
 | Home feed | 1h | Watchlist insights, empty state, refresh |
 | Stock detail | 2h | Full signal breakdown, article list with TL;DRs, recent insider |
-| BetSheet | 1h | Bottom drawer, validation, credit deduction, optimistic UI |
+| BetSheet | 1h | Bottom drawer, validation, credit deduction, optimistic UI. Atomicity via `place_bet` Postgres RPC — see [ADR 0009](docs/adr/0009-bet-placement-atomicity.md). |
 | Results page | 0.5h | Outcome cards with W/L animation |
 
 ### Day 4 — Gamification + Animations (~10h)

@@ -18,6 +18,7 @@ Format follows [Michael Nygard's ADR pattern](https://cognitect.com/blog/2011/11
 | [0006](0006-migrations-via-github-actions.md) | Migrations via GitHub Actions | Accepted |
 | [0007](0007-verdict-with-track-record.md) | Verdict with published track record (supersedes 0003) | Accepted |
 | [0008](0008-bet-window-into-market-hours.md) | Bet window extends into market hours (locks 1 PM ET) | Accepted |
+| [0009](0009-bet-placement-atomicity.md) | Bet placement runs as a Postgres RPC (atomic + concurrency-safe) | Accepted |
 
 ---
 

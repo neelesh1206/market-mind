@@ -1,17 +1,25 @@
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ExternalLink, type LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ExternalLink } from "lucide-react";
 import { AnalystBar } from "@/components/analyst-bar";
 import { SignalBar } from "@/components/signal-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
 import { VerdictBreakdown } from "@/components/verdict-breakdown";
 import { VerdictChip } from "@/components/verdict-chip";
+import { BetCta } from "@/components/bet-cta";
 import { cn } from "@/lib/utils";
+import type { Prediction } from "@/lib/bets";
 import type { StockCardData } from "@/types/insight";
+import type { MarketSchedule } from "@/lib/market-schedule";
 
 type Props = {
   data: StockCardData;
+  /** The user's existing bet for the current trading day, if any. */
+  userBet?: Prediction | null;
+  /** Current credit balance — used for stake validation in the bet sheet. */
+  userCredits?: number;
+  /** Market schedule snapshot driving the CTA's three states (chip / button / closed-label). */
+  schedule?: MarketSchedule;
 };
 
 /**
@@ -23,7 +31,7 @@ type Props = {
  * The full per-signal breakdown lives on /stock/[ticker]. This card is
  * intentionally dense-but-scannable — every row earns its place.
  */
-export function StockCard({ data }: Props) {
+export function StockCard({ data, userBet, userCredits, schedule }: Props) {
   const { stock, insight, topArticle, verdict } = data;
 
   return (
@@ -186,35 +194,21 @@ export function StockCard({ data }: Props) {
             Details →
           </Link>
         </div>
-        <div className="flex items-center gap-2">
-          <BetButton direction="UP" Icon={ArrowUp} />
-          <BetButton direction="DOWN" Icon={ArrowDown} />
-        </div>
+        {schedule && (
+          <BetCta
+            stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
+            verdict={verdict}
+            userBet={userBet ?? null}
+            userCredits={userCredits ?? 0}
+            betWindowOpen={schedule.betWindowOpen}
+            betWindowClosesAt={schedule.betWindowClosesAt}
+            betWindowOpensAt={schedule.betWindowOpensAt}
+            resolutionAt={schedule.resolutionAt}
+            size="sm"
+          />
+        )}
       </footer>
     </article>
-  );
-}
-
-/* ------------------------- subcomponents & helpers ------------------------ */
-
-function BetButton({ direction, Icon }: { direction: "UP" | "DOWN"; Icon: LucideIcon }) {
-  // Wired to the bet sheet in Task #36. For now, a disabled placeholder so the
-  // visual stays accurate.
-  return (
-    <Button
-      variant={direction === "UP" ? "default" : "outline"}
-      size="sm"
-      className={cn(
-        "h-8 gap-1 font-mono",
-        direction === "UP"
-          ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-          : "border-red-500/50 text-red-500 hover:bg-red-500/10",
-      )}
-      disabled
-      title="Bet placement comes online in Day 3 finale"
-    >
-      <Icon className="h-3.5 w-3.5" aria-hidden /> {direction}
-    </Button>
   );
 }
 

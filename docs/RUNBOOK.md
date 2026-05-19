@@ -54,6 +54,29 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: bet placement RPC
+
+The `place_bet` Postgres function (see [ADR 0009](adr/0009-bet-placement-atomicity.md))
+ships in `supabase/migrations/20260519000003_place_bet_rpc.sql` but must be
+applied to prod before any user can place a bet — without it, the
+`supabase.rpc('place_bet', ...)` call from the server action returns a
+"function does not exist" error and the BetSheet shows a generic
+"Couldn't place bet" message.
+
+Apply via the standard migration flow (Actions → "Apply Migrations to
+Production" → type `migrate`). After it runs, smoke-test by placing a
+50-credit bet on any stock and confirming:
+
+1. The card flips to the locked-in chip (`UP · 50 · Locked in`).
+2. `predictions` has the new row.
+3. `credit_transactions` has a paired `type='WAGER'`, `amount=-50` row
+   with `balance_after = previous - 50`.
+4. `user_profiles.credit_balance` decremented and `total_predictions`
+   incremented by 1.
+
+If any of those drift, the RPC didn't run atomically — check
+`supabase logs` for the failed transaction.
+
 ### Check pipeline health
 
 ```sql
