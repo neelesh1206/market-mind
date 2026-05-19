@@ -236,3 +236,38 @@ def test_vol_normalization_preserves_renormalization():
     assert v.direction == "UP"
     assert v.confidence == 0.5
     assert v.vol_factor == 2.0
+
+
+# ---------------------------------------------------------------------------
+# combined_score (ADR 0015) — the raw weighted score for cross-sectional ranking
+# ---------------------------------------------------------------------------
+
+def test_combined_score_is_exposed_for_ranking():
+    """ADR 0015: rank pass needs the raw score, not just direction/confidence."""
+    v = compute_verdict(technical=0.5, sentiment=0.4, professional=0.6, social=0.3)
+    # 0.30*0.5 + 0.25*0.4 + 0.30*0.6 + 0.15*0.3 = 0.475
+    assert v.combined_score == 0.475
+
+
+def test_combined_score_can_be_negative():
+    """Rank-1 = strongest bullish; bottom ranks have negative combined_score."""
+    v = compute_verdict(technical=-0.6, sentiment=-0.4, professional=-0.5, social=-0.3)
+    # 0.30*(-0.6) + 0.25*(-0.4) + 0.30*(-0.5) + 0.15*(-0.3) = -0.475
+    assert v.combined_score == -0.475
+
+
+def test_combined_score_zero_when_all_buckets_none():
+    v = compute_verdict(technical=None, sentiment=None, professional=None, social=None)
+    assert v.combined_score == 0.0
+
+
+def test_combined_score_independent_of_vol_factor():
+    """The raw combined_score is the same regardless of vol — vol only
+    affects the *threshold* the direction is compared against. Ranking
+    by combined_score must be stable across vol regimes."""
+    base = compute_verdict(technical=0.4, sentiment=0.2, professional=0.2, social=0.0)
+    high_vol = compute_verdict(
+        technical=0.4, sentiment=0.2, professional=0.2, social=0.0,
+        realized_vol_20d=0.04,
+    )
+    assert base.combined_score == high_vol.combined_score

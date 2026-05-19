@@ -59,6 +59,31 @@ def upsert_marketmind_prediction(client: Client, payload: dict[str, Any]) -> Non
     ).execute()
 
 
+def fetch_marketmind_rows_for_ranking(
+    client: Client, *, prediction_date: str
+) -> list[dict[str, Any]]:
+    """Pull rows we'll cross-sectionally rank — only the columns we need.
+
+    Filters out rows where `combined_score` is NULL (e.g. all-buckets-missing
+    NEUTRAL verdicts) so the rank ordering is well-defined.
+    """
+    res = (
+        client.table("marketmind_predictions")
+        .select("id, stock_id, combined_score, stocks(ticker)")
+        .eq("prediction_date", prediction_date)
+        .not_.is_("combined_score", "null")
+        .execute()
+    )
+    return res.data or []
+
+
+def update_marketmind_rank(client: Client, *, row_id: str, rank: int) -> None:
+    """Set rank_in_universe on one prediction row."""
+    client.table("marketmind_predictions").update(
+        {"rank_in_universe": rank}
+    ).eq("id", row_id).execute()
+
+
 def record_source(
     client: Client,
     *,

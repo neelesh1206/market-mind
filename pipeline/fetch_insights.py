@@ -63,6 +63,7 @@ from .fetchers.types import (
 from .fetchers.yfinance_fetcher import YFinancePriceFetcher
 from .observability import capture_error, init_logging, init_sentry
 from .processors.aggregator import aggregate
+from .processors.ranking import rank_predictions
 from .processors.sentiment import (
     FinBertSentimentProcessor,
     aggregate_sentiment,
@@ -73,10 +74,12 @@ from .processors.verdict import VerdictReasoner, compute_verdict
 from .supabase_client import (
     complete_pipeline_run,
     fetch_active_stocks,
+    fetch_marketmind_rows_for_ranking,
     insert_articles,
     make_client,
     record_source,
     start_pipeline_run,
+    update_marketmind_rank,
     upsert_marketmind_prediction,
     upsert_stock_insight,
 )
@@ -223,6 +226,19 @@ async def run(args: argparse.Namespace) -> int:
             capture_error(e, ticker=stock.ticker)
             log.exception("stock_failed ticker=%s", stock.ticker)
             stats["errors"].append({"ticker": stock.ticker, "error": str(e)})
+
+    # Cross-sectional ranking pass (ADR 0015). Runs after all per-stock
+    # work is done. Skipped in dry-run since there's nothing in the DB
+    # to rank against, and skipped when only a subset of the universe
+    # was processed (--ticker / --limit) since the rank would be
+    # misleading without the full cross-section.
+    full_universe = not (cfg.dry_run or args.dry_run or args.ticker or args.limit)
+    if full_universe:
+        try:
+            _rank_universe(supabase, target_date, log)
+        except Exception as e:  # noqa: BLE001
+            capture_error(e)
+            log.exception("ranking_pass_failed err=%s", e)
 
     status = "success"
     if stats["sources_failed"] > stats["sources_succeeded"]:
@@ -464,6 +480,9 @@ async def _process_stock(
             "reasoning": reasoning,
             "bucket_scores": verdict.bucket_scores,
             "weights_version": verdict.weights_version,
+            # ADR 0015 — raw score for cross-sectional ranking. The
+            # ranking pass at end of run will set rank_in_universe.
+            "combined_score": verdict.combined_score,
         },
     )
     log.info(
@@ -479,6 +498,34 @@ async def _process_stock(
         verdict.vol_factor,
         verdict.adjusted_threshold,
     )
+
+
+def _rank_universe(supabase: Any, target_date: str, log: logging.Logger) -> None:
+    """Post-pass: pull today's marketmind_predictions and assign rank_in_universe.
+
+    Skipped on dry-run / single-ticker / limited runs (the caller checks
+    `full_universe` before invoking).
+    """
+    rows = fetch_marketmind_rows_for_ranking(supabase, prediction_date=target_date)
+    if not rows:
+        log.info("ranking_pass_no_rows date=%s", target_date)
+        return
+
+    ranked = rank_predictions(rows)
+    log.info("ranking_pass_started count=%s", len(ranked))
+
+    for row_id, rank, _score, _ticker in ranked:
+        update_marketmind_rank(supabase, row_id=row_id, rank=rank)
+
+    # Top 5 long / bottom 5 short — the high-conviction surface.
+    top = ranked[:5]
+    bottom = ranked[-5:][::-1]  # reverse so most-bearish is first
+
+    def _fmt(items: list[tuple[str, int, float, str | None]]) -> str:
+        return " ".join(f"{t or '?'}({s:+.2f})" for _id, _r, s, t in items)
+
+    log.info("top_long  %s", _fmt(top))
+    log.info("top_short %s", _fmt(bottom))
 
 
 def _build_social(

@@ -390,6 +390,23 @@ confidence = min(|combined|, 1.0)`}
             documents the design.
           </p>
           <p className="text-muted-foreground text-sm leading-relaxed">
+            Alongside the per-stock verdict, every prediction also carries a{" "}
+            <span className="text-foreground">rank within the day&apos;s universe</span>: rank 1 is
+            the strongest bullish call across all 50 stocks, rank N is the strongest bearish. The
+            absolute combined score is sensitive to formula choices and bucket scaling; the rank
+            is the more honest unit of conviction — &ldquo;today&apos;s top 5 long calls&rdquo;
+            is what a long-short factor model would care about.{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0015-cross-sectional-ranking.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0015 <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            explains why ranks beat absolute scores.
+          </p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
             <a
               href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0007-verdict-with-track-record.md"
               target="_blank"

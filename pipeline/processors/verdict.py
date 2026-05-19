@@ -58,6 +58,12 @@ class Verdict:
     # which threshold the call was made against.
     adjusted_threshold: float = DIRECTION_THRESHOLD
     vol_factor: float = 1.0
+    # The raw weighted-renormalized score before the direction threshold
+    # check. Kept on the Verdict so the cross-sectional ranking pass
+    # (ADR 0015) can re-rank without recomputing from bucket scores, and
+    # so resolved-prediction analysis can stratify by combined-score
+    # magnitude independent of the direction call.
+    combined_score: float = 0.0
 
 
 def _vol_factor(realized_vol_20d: float | None) -> float:
@@ -115,6 +121,7 @@ def compute_verdict(
             weights_version=WEIGHTS_VERSION,
             adjusted_threshold=adjusted_threshold,
             vol_factor=round(vol_factor, 3),
+            combined_score=0.0,
         )
 
     total_weight = sum(WEIGHTS_V1[k] for k in present)
@@ -137,6 +144,7 @@ def compute_verdict(
         weights_version=WEIGHTS_VERSION,
         adjusted_threshold=adjusted_threshold,
         vol_factor=round(vol_factor, 3),
+        combined_score=round(combined, 3),
     )
 
 
