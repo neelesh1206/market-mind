@@ -9,6 +9,7 @@ import { ArticleDetail } from "@/components/article-detail";
 import { AnalystBar } from "@/components/analyst-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { VerdictBreakdown } from "@/components/verdict-breakdown";
 import { VerdictChip } from "@/components/verdict-chip";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
@@ -163,10 +164,13 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           </section>
         )}
 
-        {/* MarketMind verdict */}
-        {verdict && (
-          <section className="border-border/60 bg-card/40 rounded-xl border p-5">
+        {/* MarketMind verdict + math */}
+        {verdict && insight && (
+          <section className="border-border/60 bg-card/40 space-y-4 rounded-xl border p-5">
             <VerdictChip verdict={verdict} showReasoning />
+            <div className="border-border/40 border-t pt-4">
+              <VerdictBreakdown insight={insight} variant="full" />
+            </div>
           </section>
         )}
 

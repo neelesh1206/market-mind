@@ -5,6 +5,7 @@ import { AnalystBar } from "@/components/analyst-bar";
 import { SignalBar } from "@/components/signal-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { VerdictBreakdown } from "@/components/verdict-breakdown";
 import { VerdictChip } from "@/components/verdict-chip";
 import { cn } from "@/lib/utils";
 import type { StockCardData } from "@/types/insight";
@@ -108,8 +109,9 @@ export function StockCard({ data }: Props) {
 
       {/* Verdict chip — MarketMind's read for the day */}
       {verdict && (
-        <section className="border-border/40 border-t px-5 py-3">
+        <section className="border-border/40 space-y-2 border-t px-5 py-3">
           <VerdictChip verdict={verdict} showReasoning />
+          {insight && <VerdictBreakdown insight={insight} variant="compact" />}
         </section>
       )}
 
