@@ -256,6 +256,197 @@ confidence = min(|combined|, 1.0)`}
           </p>
         </section>
 
+        {/* When does DOWN appear */}
+        <section className="space-y-4">
+          <header className="space-y-1">
+            <h2 className="text-2xl font-semibold">When does the verdict show DOWN?</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              The most common question we get: &ldquo;Why is everything UP?&rdquo; The answer is in
+              the math — and in the kinds of stocks people pick. Here&apos;s exactly what it takes.
+            </p>
+          </header>
+
+          {/* Threshold */}
+          <div className="border-border/60 bg-card/30 space-y-2 rounded-xl border p-5">
+            <p className="text-foreground/90 text-sm font-medium">The DOWN threshold</p>
+            <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs leading-relaxed">
+              {`combined = 0.30·Tech + 0.25·Sent + 0.30·Prof + 0.15·Soc
+
+if combined > +0.15   →  UP
+if combined < -0.15   →  DOWN
+otherwise             →  NEUTRAL`}
+            </pre>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              You need the weighted sum below{" "}
+              <span className="text-foreground font-mono">-0.15</span> for a DOWN call. Practically
+              that means at least two buckets meaningfully bearish, or one bucket very deeply
+              bearish.
+            </p>
+          </div>
+
+          {/* Scenario table */}
+          <div className="border-border/60 bg-card/30 overflow-x-auto rounded-xl border p-5">
+            <p className="text-foreground/90 mb-3 text-sm font-medium">
+              What different signal mixes produce
+            </p>
+            <table className="w-full font-mono text-[11px] tabular-nums">
+              <thead>
+                <tr className="border-border/40 text-muted-foreground border-b text-[10px] tracking-wider uppercase">
+                  <th className="px-2 py-1.5 text-left font-medium">Scenario</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Tech</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Sent</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Prof</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Soc</th>
+                  <th className="px-2 py-1.5 text-right font-medium">= Net</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Verdict</th>
+                </tr>
+              </thead>
+              <tbody className="text-foreground/80">
+                <ScenarioRow
+                  label="Mega-cap normal day"
+                  tech={-0.1}
+                  sent={0.3}
+                  prof={0.7}
+                  soc={0.5}
+                  net={0.32}
+                  verdict="UP"
+                />
+                <ScenarioRow
+                  label="Mixed signals"
+                  tech={-0.3}
+                  sent={-0.2}
+                  prof={0.3}
+                  soc={-0.2}
+                  net={-0.08}
+                  verdict="NEUTRAL"
+                />
+                <ScenarioRow
+                  label="Earnings miss"
+                  tech={-0.4}
+                  sent={-0.5}
+                  prof={-0.3}
+                  soc={-0.4}
+                  net={-0.4}
+                  verdict="DOWN"
+                />
+                <ScenarioRow
+                  label="Big downgrade wave"
+                  tech={0.1}
+                  sent={-0.2}
+                  prof={-0.7}
+                  soc={-0.3}
+                  net={-0.25}
+                  verdict="DOWN"
+                />
+                <ScenarioRow
+                  label="RSI overbought only"
+                  tech={-0.7}
+                  sent={0.2}
+                  prof={0.5}
+                  soc={0.4}
+                  net={0.05}
+                  verdict="NEUTRAL"
+                />
+              </tbody>
+            </table>
+          </div>
+
+          {/* Why feeds lean UP */}
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-5">
+            <p className="text-foreground/90 text-sm font-medium">
+              Why your feed probably leans UP
+            </p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              If you picked mega-caps (AAPL, NVDA, MSFT, GOOGL, META…), the bullish bias is
+              structural — not a bug. Mega-caps have a different signal distribution than the
+              broader market:
+            </p>
+            <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
+              <li>
+                <span className="text-foreground font-medium">Professional (30% weight):</span>{" "}
+                Analysts rate mega-caps Buy/Hold roughly 85% of the time. Sell ratings are
+                vanishingly rare.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Sentiment (25% weight):</span>{" "}
+                Coverage is mostly favorable — earnings beats, AI hype, expansion stories. Major
+                negative coverage requires a real catalyst.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Social (15% weight):</span> High
+                retail attention typically comes with bullish framing.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Technical (30% weight):</span> The
+                only bucket that swings both ways equally — but one bearish technical contribution
+                alone caps at -0.30, not enough to push past the threshold.
+              </li>
+            </ul>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              That&apos;s why <span className="text-foreground font-mono">COIN</span> with Technical{" "}
+              <span className="font-mono text-red-500">-0.50</span> still shows{" "}
+              <span className="text-foreground font-mono">NEUTRAL</span> when Professional{" "}
+              <span className="font-mono text-emerald-500">+0.58</span> + Social{" "}
+              <span className="font-mono text-emerald-500">+0.42</span> neutralize the bearish
+              technical. The math is doing exactly what it should.
+            </p>
+          </div>
+
+          {/* Real scenarios that flip DOWN */}
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-5">
+            <p className="text-foreground/90 text-sm font-medium">
+              Real-world triggers for DOWN verdicts
+            </p>
+            <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
+              <li>
+                <span className="text-foreground font-medium">Day after a bad earnings miss</span> —
+                Sentiment crashes, Technical follows, often Professional downgrades pile on within
+                24-48 hours
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Analyst downgrade wave</span> —
+                Professional is the biggest single weight; a 30% drop here moves the needle hard
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Regulatory bombshell</span> — FTC
+                suit, FDA rejection, DOJ probe — flips Sentiment + Professional in one news cycle
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Insider sell cluster</span> — multiple
+                Form 4 filings within a few days flips Professional to negative even before analysts
+                react
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Broad macro selloff</span> — Technical
+                breaks down across the board, VIX spikes; mega-caps less affected than small-caps
+              </li>
+            </ul>
+          </div>
+
+          {/* How to see DOWN naturally */}
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-5">
+            <p className="text-foreground/90 text-sm font-medium">
+              Want to see DOWN verdicts in your feed?
+            </p>
+            <ol className="text-muted-foreground ml-4 list-decimal space-y-1.5 text-sm leading-relaxed">
+              <li>
+                Add some <span className="text-foreground">volatile or struggling tickers</span> to
+                your watchlist alongside the mega-caps — names like RIVN, LCID, GME, AFRM often skew
+                bearish on technical setups.
+              </li>
+              <li>
+                Watch your watchlist during <span className="text-foreground">earnings season</span>{" "}
+                — post-miss days are when the system genuinely calls DOWN.
+              </li>
+              <li>
+                Don&apos;t expect daily DOWN calls on diversified mega-cap watchlists. When DOWN
+                does show up there, it&apos;s a stronger signal precisely{" "}
+                <span className="text-foreground italic">because</span> it&apos;s rare.
+              </li>
+            </ol>
+          </div>
+        </section>
+
         {/* Cadence + freshness */}
         <section className="space-y-3">
           <h2 className="text-2xl font-semibold">Update cadence</h2>
@@ -412,5 +603,44 @@ function SignalSection({
         <span className="text-foreground font-medium">Scoring:</span> {formula}
       </p>
     </article>
+  );
+}
+
+function ScenarioRow({
+  label,
+  tech,
+  sent,
+  prof,
+  soc,
+  net,
+  verdict,
+}: {
+  label: string;
+  tech: number;
+  sent: number;
+  prof: number;
+  soc: number;
+  net: number;
+  verdict: "UP" | "DOWN" | "NEUTRAL";
+}) {
+  const fmt = (n: number) => (n > 0 ? `+${n.toFixed(2)}` : n.toFixed(2));
+  const tone = (n: number) =>
+    n > 0.05 ? "text-emerald-500" : n < -0.05 ? "text-red-500" : "text-muted-foreground";
+  const vClass =
+    verdict === "UP"
+      ? "text-emerald-500"
+      : verdict === "DOWN"
+        ? "text-red-500"
+        : "text-muted-foreground";
+  return (
+    <tr className="border-border/30 border-b last:border-b-0">
+      <td className="text-foreground/90 px-2 py-1.5 font-sans text-xs normal-case">{label}</td>
+      <td className={`px-2 py-1.5 text-right ${tone(tech)}`}>{fmt(tech)}</td>
+      <td className={`px-2 py-1.5 text-right ${tone(sent)}`}>{fmt(sent)}</td>
+      <td className={`px-2 py-1.5 text-right ${tone(prof)}`}>{fmt(prof)}</td>
+      <td className={`px-2 py-1.5 text-right ${tone(soc)}`}>{fmt(soc)}</td>
+      <td className={`px-2 py-1.5 text-right font-semibold ${tone(net)}`}>{fmt(net)}</td>
+      <td className={`px-2 py-1.5 text-right font-semibold ${vClass}`}>{verdict}</td>
+    </tr>
   );
 }
