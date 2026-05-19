@@ -148,6 +148,17 @@ class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
         month_base = float(close.iloc[idx_today - 21]) if idx_today >= 21 else last_close
         ytd_base = float(close.iloc[0])
 
+        # 20-day realized vol — stddev of daily returns, expressed as a
+        # decimal. Used downstream by compute_verdict to vol-scale the
+        # direction threshold (ADR 0014).
+        realized_vol = None
+        if len(close) >= 21:
+            daily_returns = close.pct_change().dropna().tail(20)
+            if len(daily_returns) >= 20:
+                vol_value = float(daily_returns.std())
+                if pd.notna(vol_value):
+                    realized_vol = round(vol_value, 4)
+
         return PriceSnapshot(
             ticker=ticker,
             prev_close=round(last_close, 2),
@@ -167,4 +178,5 @@ class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
             ),
             bollinger_position=bollinger_position,
             volume_trend=_classify_volume_trend(volume),
+            realized_vol_20d=realized_vol,
         )

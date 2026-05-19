@@ -49,10 +49,13 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   // OG image routes MUST be public — social link unfurlers (Twitter, LinkedIn,
   // Slack, iMessage, etc.) crawl them without any cookies. If we redirect to
   // /login, every shared stock URL falls back to a generic preview instead of
-  // our beautiful dynamic card. Same logic would apply to any future
-  // /robots.txt, /sitemap.xml — anything indexable / unfurl-able.
+  // our beautiful dynamic card. /stock/[ticker] is also public because that's
+  // where the og:image meta tag lives — unfurlers hit the page first, read
+  // the meta, THEN fetch the image. If /stock/* is gated, the meta is never
+  // read. Same logic for /robots.txt, /sitemap.xml.
   const isPublicCrawlable =
     pathname.startsWith("/og/") ||
+    pathname.startsWith("/stock/") ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml";
 

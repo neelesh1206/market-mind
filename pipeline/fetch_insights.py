@@ -437,6 +437,7 @@ async def _process_stock(
         sentiment=buckets.sentiment,
         professional=buckets.professional,
         social=buckets.social,
+        realized_vol_20d=price.realized_vol_20d if price else None,
     )
     reasoning: str | None = None
     if verdict_reasoner:
@@ -466,10 +467,17 @@ async def _process_stock(
         },
     )
     log.info(
-        "verdict ticker=%s direction=%s confidence=%.2f",
+        "verdict ticker=%s direction=%s confidence=%.2f vol=%s factor=%.2f threshold=%.3f",
         stock.ticker,
         verdict.direction,
         verdict.confidence,
+        (
+            f"{price.realized_vol_20d:.4f}"
+            if (price and price.realized_vol_20d is not None)
+            else "n/a"
+        ),
+        verdict.vol_factor,
+        verdict.adjusted_threshold,
     )
 
 

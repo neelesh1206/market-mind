@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { ArrowLeft, Calendar, TrendingUp } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileMenu } from "@/components/profile-menu";
@@ -58,25 +58,41 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const { ticker } = await params;
   const supabase = await createClient();
 
+  // The page is **publicly readable** — anonymous visitors land here from
+  // social unfurls (Twitter, LinkedIn etc), shared links, or SEO crawl. The
+  // og:image meta tag lives in this page's HTML, so unfurlers must be able
+  // to reach it without auth. Auth-gated affordances (bet CTA, locked-in
+  // chip, daily bonus) are hidden when `userId` is null; everything else
+  // — signals, verdict, articles, sparkline — renders for everyone.
   const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims) {
-    redirect("/login");
-  }
-
-  const userId = claims.claims.sub as string;
-  const email = (claims.claims.email ?? userId) as string;
+  const userId = (claims?.claims?.sub as string | undefined) ?? null;
+  const email = (claims?.claims?.email as string | undefined) ?? null;
 
   const schedule = getMarketSchedule();
+
+  // Build the parallel-fetch list. Skip user-scoped queries when anonymous.
+  const detailP = fetchStockDetail(supabase, ticker);
+  const priceBarsP = fetchDailyBars(ticker, 30);
+  const watchlistP = userId
+    ? fetchUserWatchlist(supabase, userId)
+    : Promise.resolve([]);
+  const profileP = userId
+    ? supabase
+        .from("user_profiles")
+        .select("display_name, credit_balance")
+        .eq("id", userId)
+        .maybeSingle()
+    : Promise.resolve({ data: null });
+  const betsP = userId
+    ? fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel)
+    : Promise.resolve({} as Record<string, never>);
+
   const [detail, watchlist, profileRes, betsByStockId, priceBars] = await Promise.all([
-    fetchStockDetail(supabase, ticker),
-    fetchUserWatchlist(supabase, userId),
-    supabase
-      .from("user_profiles")
-      .select("display_name, credit_balance")
-      .eq("id", userId)
-      .maybeSingle(),
-    fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
-    fetchDailyBars(ticker, 30),
+    detailP,
+    watchlistP,
+    profileP,
+    betsP,
+    priceBarsP,
   ]);
 
   if (!detail) {
@@ -85,9 +101,10 @@ export default async function StockDetailPage({ params }: { params: Params }) {
 
   const profile = profileRes.data;
   const credits = profile?.credit_balance ?? 0;
-  const name = profile?.display_name ?? email;
+  const name = profile?.display_name ?? email ?? null;
   const { stock, insight, articles, verdict } = detail;
-  const userBet = betsByStockId[stock.id] ?? null;
+  const userBet = userId ? (betsByStockId[stock.id] ?? null) : null;
+  const isAnon = userId === null;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -103,15 +120,30 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           </Link>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="border-border/60 bg-card/40 flex items-center gap-2 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span className="text-xs font-medium tabular-nums">
-                {credits.toLocaleString()}
-                <span className="text-muted-foreground hidden sm:inline"> credits</span>
-              </span>
-            </div>
+            {!isAnon && (
+              <div className="border-border/60 bg-card/40 flex items-center gap-2 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className="text-xs font-medium tabular-nums">
+                  {credits.toLocaleString()}
+                  <span className="text-muted-foreground hidden sm:inline"> credits</span>
+                </span>
+              </div>
+            )}
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            {isAnon ? (
+              <Link
+                href="/login"
+                className="bg-foreground text-background hover:bg-foreground/90 inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold transition-colors"
+              >
+                Sign in
+              </Link>
+            ) : (
+              <ProfileMenu
+                email={email ?? ""}
+                displayName={name ?? "You"}
+                watchlistCount={watchlist.length}
+              />
+            )}
           </div>
         </div>
       </header>
@@ -424,24 +456,39 @@ export default async function StockDetailPage({ params }: { params: Params }) {
         <section className="border-border/60 bg-card/20 flex flex-wrap items-center justify-between gap-4 rounded-xl border p-5">
           <div className="space-y-0.5">
             <p className="text-sm font-medium">
-              {userBet ? "Your bet for today" : "Your prediction"}
+              {isAnon
+                ? "Want to put credits behind this call?"
+                : userBet
+                  ? "Your bet for today"
+                  : "Your prediction"}
             </p>
             <p className="text-muted-foreground text-xs">
-              Bet window: 8 PM ET → 1 PM ET next trading day. Resolves at 4:15 PM ET.
+              {isAnon
+                ? "Sign in to place a virtual-credit bet — bet window 8 PM ET → 1 PM ET next trading day."
+                : "Bet window: 8 PM ET → 1 PM ET next trading day. Resolves at 4:15 PM ET."}
             </p>
           </div>
-          <BetCta
-            stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
-            verdict={verdict}
-            userBet={userBet}
-            userCredits={credits}
-            betWindowOpen={schedule.betWindowOpen}
-            betWindowClosesAt={schedule.betWindowClosesAt}
-            betWindowOpensAt={schedule.betWindowOpensAt}
-            resolutionAt={schedule.resolutionAt}
-            todayEt={etCalendarDate()}
-            size="lg"
-          />
+          {isAnon ? (
+            <Link
+              href="/login"
+              className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-emerald-600/90"
+            >
+              Sign in to bet →
+            </Link>
+          ) : (
+            <BetCta
+              stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
+              verdict={verdict}
+              userBet={userBet}
+              userCredits={credits}
+              betWindowOpen={schedule.betWindowOpen}
+              betWindowClosesAt={schedule.betWindowClosesAt}
+              betWindowOpensAt={schedule.betWindowOpensAt}
+              resolutionAt={schedule.resolutionAt}
+              todayEt={etCalendarDate()}
+              size="lg"
+            />
+          )}
         </section>
 
         {/* Methodology link */}

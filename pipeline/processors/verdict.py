@@ -31,6 +31,17 @@ WEIGHTS_VERSION = "v1"
 # Below this absolute combined score, we call it NEUTRAL.
 DIRECTION_THRESHOLD = 0.15
 
+# Vol normalization parameters (ADR 0014).
+# REFERENCE_VOL is a fixed prior — the median 20-day realized vol of a
+# typical large-cap (~2% daily stddev). Using a fixed prior instead of
+# universe-median makes the threshold stable when the universe changes.
+REFERENCE_VOL = 0.02
+# Clamp vol_factor to prevent extreme over/under-adjustment for outliers
+# (e.g. a freshly-IPO'd ticker with three days of history shouldn't get
+# a 10× threshold; a stalled penny-stock shouldn't get a 0.01× threshold).
+VOL_FACTOR_MIN = 0.5
+VOL_FACTOR_MAX = 2.5
+
 
 Direction = Literal["UP", "DOWN", "NEUTRAL"]
 
@@ -42,6 +53,24 @@ class Verdict:
     reasoning: str | None
     bucket_scores: dict[str, float | None]
     weights_version: str
+    # Per-stock direction threshold actually applied (after vol scaling).
+    # Frozen here so the resolved-prediction analysis can see exactly
+    # which threshold the call was made against.
+    adjusted_threshold: float = DIRECTION_THRESHOLD
+    vol_factor: float = 1.0
+
+
+def _vol_factor(realized_vol_20d: float | None) -> float:
+    """Map a stock's realized vol to a multiplier on the direction threshold.
+
+    Returns 1.0 (no adjustment) when vol is unavailable. Higher vol →
+    higher factor → harder to flip directional. Clamped to
+    [VOL_FACTOR_MIN, VOL_FACTOR_MAX].
+    """
+    if realized_vol_20d is None or realized_vol_20d <= 0:
+        return 1.0
+    raw = realized_vol_20d / REFERENCE_VOL
+    return max(VOL_FACTOR_MIN, min(VOL_FACTOR_MAX, raw))
 
 
 def compute_verdict(
@@ -50,17 +79,21 @@ def compute_verdict(
     sentiment: float | None,
     professional: float | None,
     social: float | None,
+    realized_vol_20d: float | None = None,
 ) -> Verdict:
     """
     Combine bucket scores into a single weighted verdict.
 
     Missing buckets (None) are EXCLUDED from the sum; the remaining weights
-    are renormalized so present buckets keep their relative importance. The
-    earlier implementation coerced None to 0, which silently imposed a
-    bearish-ish drag whenever a positive bucket lacked corroborating data
-    (e.g. a +0.4 technical with no professional read got diluted to
-    0.4 * 0.30 = 0.12 instead of being treated as the sole available
-    signal). All-missing → NEUTRAL with confidence 0.
+    are renormalized so present buckets keep their relative importance.
+    All-missing → NEUTRAL with confidence 0.
+
+    The directional threshold is **scaled per-stock by realized 20-day
+    vol** (ADR 0014). High-vol stocks like NVDA (σ ≈ 3.5% daily) need a
+    larger combined score to flip directional than low-vol stocks like
+    PG (σ ≈ 0.9%), since the same magnitude signal is less informative
+    against louder noise. Vol-unaware callers (omit the kwarg) get the
+    flat DIRECTION_THRESHOLD as before.
     """
     raw = {
         "technical": technical,
@@ -70,6 +103,9 @@ def compute_verdict(
     }
     present = {k: float(v) for k, v in raw.items() if v is not None}
 
+    vol_factor = _vol_factor(realized_vol_20d)
+    adjusted_threshold = round(DIRECTION_THRESHOLD * vol_factor, 4)
+
     if not present:
         return Verdict(
             direction="NEUTRAL",
@@ -77,14 +113,16 @@ def compute_verdict(
             reasoning=None,
             bucket_scores=raw,
             weights_version=WEIGHTS_VERSION,
+            adjusted_threshold=adjusted_threshold,
+            vol_factor=round(vol_factor, 3),
         )
 
     total_weight = sum(WEIGHTS_V1[k] for k in present)
     combined = sum(present[k] * WEIGHTS_V1[k] for k in present) / total_weight
 
-    if combined > DIRECTION_THRESHOLD:
+    if combined > adjusted_threshold:
         direction: Direction = "UP"
-    elif combined < -DIRECTION_THRESHOLD:
+    elif combined < -adjusted_threshold:
         direction = "DOWN"
     else:
         direction = "NEUTRAL"
@@ -97,6 +135,8 @@ def compute_verdict(
         reasoning=None,  # filled below by the reasoning generator
         bucket_scores=raw,
         weights_version=WEIGHTS_VERSION,
+        adjusted_threshold=adjusted_threshold,
+        vol_factor=round(vol_factor, 3),
     )
 
 

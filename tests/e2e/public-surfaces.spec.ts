@@ -54,6 +54,28 @@ test.describe("public surfaces", () => {
     expect(body.byteLength).toBeGreaterThan(10_000); // sanity: real OG cards are ≥10kb
   });
 
+  test("/stock/[ticker] is publicly readable + carries og:image meta", async ({ page, request }) => {
+    // The OG card chain only works if unfurlers can fetch /stock/X without
+    // auth AND find the og:image meta tag pointing at /og/stock/X. Test the
+    // whole chain — this was a real bug that shipped briefly when /stock/*
+    // got 307-redirected to /login.
+    const res = await request.get("/stock/AAPL");
+    expect(res.status()).toBe(200);
+
+    await page.goto("/stock/AAPL");
+    const ogImage = await page
+      .locator('meta[property="og:image"]')
+      .getAttribute("content");
+    expect(ogImage).toBeTruthy();
+    expect(ogImage).toContain("/og/stock/AAPL");
+
+    // Twitter card variant — required for the "summary_large_image" rendering.
+    const twitterCard = await page
+      .locator('meta[name="twitter:card"]')
+      .getAttribute("content");
+    expect(twitterCard).toBe("summary_large_image");
+  });
+
   test("/og/stock/INVALID returns 404", async ({ request }) => {
     // Tickers not in our pool should 404, not 500. Catches the OG route
     // crashing on bad input — common regression after refactors.

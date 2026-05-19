@@ -23,6 +23,12 @@ class PriceSnapshot:
     price_vs_50ma: Literal["above", "below"] | None
     bollinger_position: Literal["upper", "middle", "lower"] | None
     volume_trend: Literal["increasing", "decreasing", "neutral"] | None
+    # Stddev of the last 20 daily returns, expressed as a decimal (e.g.
+    # 0.035 = 3.5% daily vol). Used by compute_verdict to scale the
+    # direction threshold per stock so that high-vol names (NVDA, COIN)
+    # need a stronger combined signal to flip directional than low-vol
+    # names (PG, KO). None if there's insufficient history.
+    realized_vol_20d: float | None = None
 
 
 @dataclass

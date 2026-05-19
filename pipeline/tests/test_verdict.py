@@ -142,3 +142,97 @@ def test_value_just_above_threshold_is_directional():
 
 def test_weights_sum_to_one():
     assert abs(sum(WEIGHTS_V1.values()) - 1.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Vol normalization (ADR 0014) — per-stock threshold scaling.
+# ---------------------------------------------------------------------------
+
+def test_no_vol_provided_uses_flat_threshold():
+    """Omitting realized_vol_20d preserves prior behavior — flat 0.15 threshold."""
+    # Score at 0.20 — above the flat threshold of 0.15
+    v = compute_verdict(
+        technical=0.4, sentiment=0.2, professional=0.2, social=0.0
+    )
+    # combined = 0.30*0.4 + 0.25*0.2 + 0.30*0.2 + 0.15*0 = 0.23 → UP
+    assert v.direction == "UP"
+    assert v.vol_factor == 1.0
+    assert v.adjusted_threshold == DIRECTION_THRESHOLD
+
+
+def test_high_vol_stock_needs_stronger_signal_to_flip_directional():
+    """A combined score of ~0.20 flips a low-vol stock UP but leaves a
+    high-vol stock NEUTRAL (the noise overlay swamps the signal)."""
+    # vol = 0.040 (4% daily, NVDA-like) → factor = 2.0 → threshold = 0.30
+    v_high = compute_verdict(
+        technical=0.4, sentiment=0.2, professional=0.2, social=0.0,
+        realized_vol_20d=0.040,
+    )
+    # combined ≈ 0.23, below the vol-adjusted 0.30 → NEUTRAL
+    assert v_high.direction == "NEUTRAL"
+    assert v_high.vol_factor == 2.0
+    assert v_high.adjusted_threshold == 0.30
+
+
+def test_low_vol_stock_flips_directional_on_modest_signal():
+    """The same 0.10 combined score that would be NEUTRAL on a typical
+    stock is UP on a very-quiet (PG-like) name."""
+    # vol = 0.008 (0.8% daily, PG-like) → factor = 0.5 (clamped) → threshold = 0.075
+    v_low = compute_verdict(
+        technical=0.2, sentiment=0.1, professional=0.0, social=0.0,
+        realized_vol_20d=0.008,
+    )
+    # combined = 0.30*0.2 + 0.25*0.1 + 0.30*0 + 0.15*0 = 0.085 → UP @ adjusted 0.075
+    assert v_low.direction == "UP"
+    assert v_low.vol_factor == 0.5  # clamped min
+    assert v_low.adjusted_threshold == 0.075
+
+
+def test_vol_factor_clamps_at_extremes():
+    """Extreme realized vols (freshly-IPO'd, halt-induced spikes, etc.)
+    don't produce absurd thresholds."""
+    # Crazy high vol → clamped to factor 2.5
+    v_extreme_high = compute_verdict(
+        technical=0.5, sentiment=0.5, professional=0.5, social=0.5,
+        realized_vol_20d=0.20,   # 20% daily — absurd
+    )
+    assert v_extreme_high.vol_factor == 2.5
+    assert v_extreme_high.adjusted_threshold == round(0.15 * 2.5, 4)
+
+    # Crazy low vol → clamped to factor 0.5
+    v_extreme_low = compute_verdict(
+        technical=0.1, sentiment=0.0, professional=0.0, social=0.0,
+        realized_vol_20d=0.0001,
+    )
+    assert v_extreme_low.vol_factor == 0.5
+    assert v_extreme_low.adjusted_threshold == 0.075
+
+
+def test_zero_or_negative_vol_treated_as_unavailable():
+    """Defensive: bad vol values shouldn't crash or distort the threshold."""
+    v_zero = compute_verdict(
+        technical=0.3, sentiment=0.0, professional=0.0, social=0.0,
+        realized_vol_20d=0.0,
+    )
+    assert v_zero.vol_factor == 1.0
+    assert v_zero.adjusted_threshold == DIRECTION_THRESHOLD
+
+    v_neg = compute_verdict(
+        technical=0.3, sentiment=0.0, professional=0.0, social=0.0,
+        realized_vol_20d=-0.5,  # impossible, but be defensive
+    )
+    assert v_neg.vol_factor == 1.0
+
+
+def test_vol_normalization_preserves_renormalization():
+    """The two adjustments compose — renormalization happens first
+    (over present buckets), then vol scales the threshold."""
+    # Only technical present, vol-elevated
+    v = compute_verdict(
+        technical=0.5, sentiment=None, professional=None, social=None,
+        realized_vol_20d=0.04,   # factor 2.0, threshold 0.30
+    )
+    # Renormalized combined = 0.5 (technical alone, full weight); compare to 0.30
+    assert v.direction == "UP"
+    assert v.confidence == 0.5
+    assert v.vol_factor == 2.0
