@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllStocks, fetchUserWatchlist } from "@/lib/watchlist";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { StockPicker } from "./picker";
 
 export const metadata = {
@@ -56,7 +57,12 @@ export default async function OnboardingPage() {
             </div>
             <span className="text-lg font-semibold tracking-tight">MarketMind</span>
           </div>
-          <span className="text-muted-foreground text-xs">Step 1 of 1 · Setup</span>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground hidden text-xs sm:inline">
+              Step 1 of 1 · Setup
+            </span>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
