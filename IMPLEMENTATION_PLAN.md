@@ -1045,7 +1045,7 @@ UPSTASH_REDIS_REST_TOKEN=
 | HuggingFace API throttles during burst | Process in batches, cache results, retry with backoff |
 | MarketWatch session cookie expires | Pipeline alerts via Sentry, you refresh cookie manually |
 | FinBERT sentiment misclassifies finance jargon | Cross-source agreement masks individual bad reads |
-| 8-K filing race condition vs prediction lock | Locks at 9:15 AM, accept 15-min staleness as risk |
+| 8-K filing race condition vs prediction lock | Bet locks at 1 PM ET (ADR 0008); verdict was computed 8 PM prior day — overnight 8-K can move open price, accept as part of the trading-day signal |
 | Friend churn after 1 week | Week 2 gamification ships fast |
 
 ---

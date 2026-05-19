@@ -452,21 +452,44 @@ otherwise             →  NEUTRAL`}
           <h2 className="text-2xl font-semibold">Update cadence</h2>
           <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
             <li>
-              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline runs. Fresh
-              insights for the next trading day are computed and written.
+              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline runs the
+              night before. Fresh insights + verdict for the next trading day are computed and
+              locked.
             </li>
             <li>
-              <span className="text-foreground font-mono">9:15 AM ET</span> — bet window closes for
-              the day.
+              <span className="text-foreground font-mono">8:00 PM ET</span> — bet window opens for
+              the next trading day.
             </li>
             <li>
-              <span className="text-foreground font-mono">4:15 PM ET</span> — resolution job
-              evaluates the day&apos;s predictions against market close.
+              <span className="text-foreground font-mono">9:30 AM ET</span> — market opens. Bet
+              window stays open — you can place bets while watching live price action.
+            </li>
+            <li>
+              <span className="text-foreground font-mono">1:00 PM ET</span> — bet window locks (= 10
+              AM PT). Late bettors trade prediction time for confirmation. The verdict was made the
+              night before — only the user&apos;s call is informed by intraday moves.
+            </li>
+            <li>
+              <span className="text-foreground font-mono">4:00 PM ET</span> — market closes.
+            </li>
+            <li>
+              <span className="text-foreground font-mono">4:15 PM ET</span> — resolution job runs.
+              Outcome per stock is{" "}
+              <span className="text-foreground font-mono">sign(close − open)</span>.
             </li>
           </ul>
           <p className="text-muted-foreground text-sm leading-relaxed">
             Stock prices are 15-minute delayed (Massive Starter tier). News articles surface within
-            1-2 hours of publication.
+            1-2 hours of publication. See{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0008-bet-window-into-market-hours.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0008 <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            for the reasoning behind the extended bet window.
           </p>
         </section>
 

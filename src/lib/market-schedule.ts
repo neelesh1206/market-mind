@@ -91,8 +91,12 @@ const MARKET_OPEN_MIN_ET = 30;
 const MARKET_CLOSE_HOUR_ET = 16; // 4 PM
 const RESOLUTION_HOUR_ET = 16;
 const RESOLUTION_MIN_ET = 15;
-const BET_LOCK_HOUR_ET = 9;
-const BET_LOCK_MIN_ET = 15;
+// Bet window now locks at 1 PM ET (= 10 AM PT). See ADR 0008.
+// Lets users bet through morning + early-afternoon trading on the day,
+// not just the 8 PM → 9:15 AM dead-of-night window. Late bettors trade
+// prediction time for confirmation (live price action).
+const BET_LOCK_HOUR_ET = 13;
+const BET_LOCK_MIN_ET = 0;
 
 function isWeekend(weekday: number): boolean {
   return weekday === 0 || weekday === 6;
