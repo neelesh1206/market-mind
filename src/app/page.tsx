@@ -2,8 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
+import { fetchHomeFeed, rankFeed } from "@/lib/feed";
 import { SignOutButton } from "./sign-out-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { StockCard } from "@/components/stock-card";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -22,6 +24,9 @@ export default async function Home() {
     redirect("/onboarding");
   }
 
+  // Fetch latest insights + top articles for the watchlist
+  const feed = rankFeed(await fetchHomeFeed(supabase, watchlist));
+
   const { data: profile } = await supabase
     .from("user_profiles")
     .select("display_name, credit_balance, current_streak")
@@ -32,6 +37,9 @@ export default async function Home() {
   const streak = profile?.current_streak ?? 0;
   const name = profile?.display_name ?? email;
   const initial = (name?.[0] ?? "?").toUpperCase();
+
+  const cardsWithInsight = feed.filter((d) => d.insight !== null);
+  const cardsAwaiting = feed.filter((d) => d.insight === null);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -91,37 +99,82 @@ export default async function Home() {
       </header>
 
       {/* Main */}
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-6 py-12">
-        <section className="space-y-2">
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-6 py-10">
+        <section className="space-y-1">
           <p className="text-muted-foreground text-sm">
             Welcome back, <span className="text-foreground font-medium">{name}</span>
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Your daily ritual starts here.
-          </h1>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Today&apos;s feed</h1>
         </section>
 
-        {/* Stat grid */}
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Stat label="Credits" value={credits.toLocaleString()} hint="Virtual currency" />
-          <Stat
-            label="Current streak"
-            value={streak.toString()}
-            hint={streak > 0 ? "Keep it going" : "Predict tomorrow to start"}
-          />
-          <Stat label="Predictions today" value="0" hint="Window opens at 8 PM ET" />
+        {/* Quick stats row */}
+        <section className="grid grid-cols-3 gap-3">
+          <Stat label="Credits" value={credits.toLocaleString()} />
+          <Stat label="Streak" value={streak.toString()} />
+          <Stat label="Watchlist" value={watchlist.length.toString()} />
         </section>
 
-        {/* Coming-soon placeholder */}
-        <section className="border-border/60 bg-card/30 flex flex-col items-start gap-3 rounded-xl border p-8">
-          <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-            Coming next
+        {/* Cards with insights */}
+        {cardsWithInsight.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+                Ranked by signal strength
+              </h2>
+              <span className="text-muted-foreground text-[11px]">
+                {cardsWithInsight.length} stocks
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {cardsWithInsight.map((card) => (
+                <StockCard key={card.stock.id} data={card} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Awaiting-pipeline cards */}
+        {cardsAwaiting.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+              Awaiting next pipeline run
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              {cardsAwaiting.length} stocks on your watchlist don&apos;t have insights computed yet.
+              The pipeline runs nightly at 8 PM ET; trigger it manually from{" "}
+              <a
+                href="https://github.com/neelesh1206/market-mind/actions/workflows/fetch-insights.yml"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                Actions → Fetch Insights
+              </a>{" "}
+              to backfill.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {cardsAwaiting.map((c) => (
+                <span
+                  key={c.stock.id}
+                  className="border-border/60 bg-card/30 text-muted-foreground rounded-md border px-2 py-1 font-mono text-xs"
+                >
+                  {c.stock.ticker}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Bet-window note */}
+        <section className="border-border/60 bg-card/20 flex flex-col items-start gap-2 rounded-xl border p-5">
+          <span className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
+            Bet window
           </span>
-          <h2 className="text-xl font-semibold">Stock cards, signals, and predictions</h2>
-          <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
-            Day 3 of the build will surface the 50-stock pool with full signal breakdowns,
-            real-time-ish insights, and the bet sheet. Until then, the pipeline is being wired up
-            behind the scenes.
+          <p className="text-sm leading-relaxed">
+            Predictions for the next trading day open at{" "}
+            <span className="font-mono">8:00 PM ET</span> and lock at{" "}
+            <span className="font-mono">9:15 AM ET</span> the next morning. The UP/DOWN buttons on
+            each card go live once the bet sheet ships.
           </p>
         </section>
       </main>
@@ -135,12 +188,13 @@ export default async function Home() {
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-border/60 bg-card/30 rounded-xl border p-5">
-      <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tabular-nums">{value}</p>
-      <p className="text-muted-foreground/80 mt-1 text-xs">{hint}</p>
+    <div className="border-border/60 bg-card/30 rounded-xl border p-4">
+      <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
