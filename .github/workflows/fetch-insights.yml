@@ -53,9 +53,10 @@ jobs:
       HUGGINGFACE_SUMMARY_MODEL: ${{ secrets.HUGGINGFACE_SUMMARY_MODEL }}
       # Optional override: force a specific Inference provider.
       # Use this when the default model is gated to paid providers
-      # (Llama-3+, etc.). Common values: together-ai, nebius, fireworks-ai.
-      # Leave unset to use HF's auto routing (lands on hf-inference for most
-      # free models; uses your account's provider order for gated ones).
+      # (Llama-3+, etc.). Valid values: together, fireworks-ai, nebius,
+      # sambanova, cerebras, hyperbolic, novita, replicate, hf-inference,
+      # cohere, openai, fal-ai, black-forest-labs.
+      # Leave unset to use HF's auto routing.
       HUGGINGFACE_PROVIDER: ${{ secrets.HUGGINGFACE_PROVIDER }}
 
       # Free data
