@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
@@ -65,6 +66,12 @@ export default async function Home() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              href="/onboarding"
+              className="text-muted-foreground hover:text-foreground hidden text-xs font-medium transition-colors sm:inline"
+            >
+              Manage stocks ({watchlist.length})
+            </Link>
             <div className="border-border/60 bg-card/40 hidden items-center gap-2 rounded-full border px-3 py-1.5 sm:flex">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               <span className="text-xs font-medium tabular-nums">

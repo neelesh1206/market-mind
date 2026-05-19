@@ -10,6 +10,10 @@ import { saveWatchlist } from "./actions";
 
 type Props = {
   stocks: Stock[];
+  /** Pre-selected stock IDs — used when editing an existing watchlist. */
+  initialSelected?: string[];
+  /** Tweaks the CTA label and footer hint when the user has no watchlist yet. */
+  isFirstTime?: boolean;
 };
 
 /** Subtle color accent per sector — kept muted so cards still feel uniform. */
@@ -22,8 +26,8 @@ const SECTOR_COLORS: Record<string, { dot: string; ring: string }> = {
 };
 const DEFAULT_COLOR = { dot: "bg-zinc-500", ring: "ring-zinc-500/20" };
 
-export function StockPicker({ stocks }: Props) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+export function StockPicker({ stocks, initialSelected = [], isFirstTime = true }: Props) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected));
   const [activeSector, setActiveSector] = useState<string>("All");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -224,7 +228,11 @@ export function StockPicker({ stocks }: Props) {
               </p>
             )}
             <Button onClick={submit} disabled={!canSubmit || pending} size="lg">
-              {pending ? "Saving…" : `Continue${canSubmit ? ` →` : ""}`}
+              {pending
+                ? "Saving…"
+                : isFirstTime
+                  ? `Continue${canSubmit ? " →" : ""}`
+                  : `Save changes${canSubmit ? " →" : ""}`}
             </Button>
           </div>
         </div>
