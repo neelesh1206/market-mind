@@ -172,8 +172,13 @@ export function StockCard({ data }: Props) {
       {/* Footer: sources + CTAs */}
       <footer className="border-border/40 flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
         <div className="text-muted-foreground flex items-center gap-3 text-[11px]">
-          {insight?.sources_total_count != null && (
-            <span>{insight.sources_total_count} sources</span>
+          {insight?.news_article_count != null && (
+            <span
+              title="Number of news articles analyzed for sentiment. Other signals (technical, professional, social) come from separate sources."
+            >
+              {insight.news_article_count}{" "}
+              {insight.news_article_count === 1 ? "article" : "articles"}
+            </span>
           )}
           {insight?.computed_at && <span>· updated {timeAgo(insight.computed_at)}</span>}
           <Link
