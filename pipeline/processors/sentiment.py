@@ -33,7 +33,10 @@ class FinBertSentimentProcessor:
     def __init__(self, api_key: str, *, max_chars: int = 800) -> None:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
-        self._client = InferenceClient(model=MODEL, token=api_key, timeout=30)
+        # 60s leaves headroom for FinBERT cold starts on hf-inference. The
+        # serverless model can take 10-30s to load on first hit per region;
+        # subsequent calls are <1s.
+        self._client = InferenceClient(model=MODEL, token=api_key, timeout=60)
         self.max_chars = max_chars
 
     async def score(self, articles: list[NewsArticle]) -> None:
