@@ -46,7 +46,24 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   // shared stock links could land here too, so we let unauthed visitors read.
   const isPublicPage = pathname === "/about";
 
-  if (!authed && !isAuthRoute && !isPublicAsset && !isPublicPage && pathname !== "/") {
+  // OG image routes MUST be public — social link unfurlers (Twitter, LinkedIn,
+  // Slack, iMessage, etc.) crawl them without any cookies. If we redirect to
+  // /login, every shared stock URL falls back to a generic preview instead of
+  // our beautiful dynamic card. Same logic would apply to any future
+  // /robots.txt, /sitemap.xml — anything indexable / unfurl-able.
+  const isPublicCrawlable =
+    pathname.startsWith("/og/") ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml";
+
+  if (
+    !authed &&
+    !isAuthRoute &&
+    !isPublicAsset &&
+    !isPublicPage &&
+    !isPublicCrawlable &&
+    pathname !== "/"
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
