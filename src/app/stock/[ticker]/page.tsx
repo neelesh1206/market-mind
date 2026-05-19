@@ -9,6 +9,7 @@ import { ArticleDetail } from "@/components/article-detail";
 import { AnalystBar } from "@/components/analyst-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { VerdictChip } from "@/components/verdict-chip";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
@@ -50,7 +51,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const profile = profileRes.data;
   const credits = profile?.credit_balance ?? 0;
   const name = profile?.display_name ?? email;
-  const { stock, insight, articles } = detail;
+  const { stock, insight, articles, verdict } = detail;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -159,6 +160,13 @@ export default async function StockDetailPage({ params }: { params: Params }) {
               </a>{" "}
               with this ticker (or limit ≥ {stock.ticker.length} stocks) to populate.
             </p>
+          </section>
+        )}
+
+        {/* MarketMind verdict */}
+        {verdict && (
+          <section className="border-border/60 bg-card/40 rounded-xl border p-5">
+            <VerdictChip verdict={verdict} showReasoning />
           </section>
         )}
 

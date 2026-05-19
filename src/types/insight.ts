@@ -85,8 +85,30 @@ export type StockInsight = {
 };
 
 /**
+ * MarketMind's daily verdict per stock. See ADR 0007.
+ * Public-read; resolved by the 4:15 PM cron alongside user predictions.
+ */
+export type MarketMindPrediction = {
+  id: string;
+  insight_id: string;
+  stock_id: string;
+  prediction_date: string;
+  direction: "UP" | "DOWN" | "NEUTRAL";
+  confidence: number;
+  reasoning: string | null;
+  bucket_scores: Record<string, number | null>;
+  weights_version: string;
+  resolved: boolean;
+  outcome: "WIN" | "LOSS" | "VOID" | null;
+  open_price: number | null;
+  close_price: number | null;
+  resolved_at: string | null;
+  created_at: string;
+};
+
+/**
  * What gets rendered on a home-feed card: the stock metadata, today's insight,
- * and the top article with its summaries.
+ * MarketMind's verdict, and the top article with its summaries.
  */
 export type StockCardData = {
   stock: {
@@ -98,4 +120,5 @@ export type StockCardData = {
   };
   insight: StockInsight | null;
   topArticle: InsightArticle | null;
+  verdict: MarketMindPrediction | null;
 };

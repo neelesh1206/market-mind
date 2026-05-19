@@ -65,11 +65,7 @@ async def run(args: argparse.Namespace) -> int:
     )
     predictions = res.data or []
 
-    if not predictions:
-        log.info("no_unresolved_predictions date=%s", target_date)
-        return 0
-
-    log.info("predictions_to_resolve count=%s", len(predictions))
+    log.info("user_predictions_to_resolve count=%s", len(predictions))
 
     run_id = None
     if not args.dry_run:
@@ -136,21 +132,164 @@ async def run(args: argparse.Namespace) -> int:
                     log=log,
                 )
 
+    # ------------------------------------------------------------------
+    # Resolve MarketMind's own verdicts for the same date.
+    # Reuses the same price-fetch logic — independent of user predictions.
+    # ------------------------------------------------------------------
+    mm_stats = await _resolve_marketmind(
+        supabase=supabase,
+        target_date=target_date,
+        dry_run=args.dry_run,
+        log=log,
+    )
+
     if run_id:
         complete_pipeline_run(
             supabase,
             run_id=run_id,
             status="success",
-            stocks_processed=len(predictions),
-            sources_succeeded=stats["wins"] + stats["losses"] + stats["voids"],
-            sources_failed=stats["errors"],
+            stocks_processed=len(predictions) + mm_stats["count"],
+            sources_succeeded=(
+                stats["wins"] + stats["losses"] + stats["voids"]
+                + mm_stats["wins"] + mm_stats["losses"] + mm_stats["voids"]
+            ),
+            sources_failed=stats["errors"] + mm_stats["errors"],
         )
 
     log.info(
-        "resolve_done wins=%s losses=%s voids=%s errors=%s",
+        "resolve_done user_wins=%s user_losses=%s user_voids=%s errors=%s "
+        "mm_wins=%s mm_losses=%s mm_voids=%s",
         stats["wins"], stats["losses"], stats["voids"], stats["errors"],
+        mm_stats["wins"], mm_stats["losses"], mm_stats["voids"],
     )
     return 0
+
+
+async def _resolve_marketmind(
+    *,
+    supabase: Any,
+    target_date: str,
+    dry_run: bool,
+    log: logging.Logger,
+) -> dict[str, int]:
+    """Resolve MarketMind's own verdicts against the day's actual close."""
+    res = (
+        supabase.table("marketmind_predictions")
+        .select("id, stock_id, direction, stocks(ticker)")
+        .eq("prediction_date", target_date)
+        .eq("resolved", False)
+        .neq("direction", "NEUTRAL")  # NEUTRAL = no claim → nothing to score
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        log.info("no_unresolved_mm_predictions date=%s", target_date)
+        return {"count": 0, "wins": 0, "losses": 0, "voids": 0, "errors": 0}
+
+    log.info("mm_predictions_to_resolve count=%s", len(rows))
+
+    # Group by ticker to fetch each day-bar once.
+    by_ticker: dict[str, list[dict]] = {}
+    for r in rows:
+        ticker = (r.get("stocks") or {}).get("ticker")
+        if not ticker:
+            log.warning("mm_prediction_no_ticker id=%s", r["id"])
+            continue
+        by_ticker.setdefault(ticker, []).append(r)
+
+    stats = {"count": len(rows), "wins": 0, "losses": 0, "voids": 0, "errors": 0}
+
+    for ticker, group in by_ticker.items():
+        try:
+            open_price, close_price = await asyncio.to_thread(
+                _fetch_day_bar, ticker, target_date
+            )
+        except Exception as e:  # noqa: BLE001
+            log.exception("mm_price_fetch_failed ticker=%s err=%s", ticker, e)
+            for r in group:
+                _commit_mm_void(supabase, r, log, dry_run=dry_run)
+                stats["voids"] += 1
+                stats["errors"] += 1
+            continue
+
+        if open_price is None or close_price is None:
+            log.warning("mm_missing_prices ticker=%s", ticker)
+            for r in group:
+                _commit_mm_void(supabase, r, log, dry_run=dry_run)
+                stats["voids"] += 1
+            continue
+
+        for r in group:
+            outcome = _outcome_only(
+                direction=r["direction"], open_price=open_price, close_price=close_price
+            )
+            if outcome == "WIN":
+                stats["wins"] += 1
+            elif outcome == "LOSS":
+                stats["losses"] += 1
+            else:
+                stats["voids"] += 1
+
+            if dry_run:
+                log.info(
+                    "dry_run_mm_resolve id=%s ticker=%s dir=%s open=%.2f close=%.2f outcome=%s",
+                    r["id"], ticker, r["direction"], open_price, close_price, outcome,
+                )
+            else:
+                _commit_mm_resolution(
+                    supabase=supabase,
+                    prediction_id=r["id"],
+                    open_price=open_price,
+                    close_price=close_price,
+                    outcome=outcome,
+                    log=log,
+                )
+
+    return stats
+
+
+def _outcome_only(*, direction: str, open_price: float, close_price: float) -> str:
+    """Like _evaluate but without payout logic — for the marketmind table."""
+    if open_price == close_price:
+        return "VOID"
+    moved_up = close_price > open_price
+    won = (direction == "UP" and moved_up) or (direction == "DOWN" and not moved_up)
+    return "WIN" if won else "LOSS"
+
+
+def _commit_mm_void(
+    supabase: Any, row: dict, log: logging.Logger, *, dry_run: bool
+) -> None:
+    if dry_run:
+        log.info("dry_run_mm_void id=%s reason=price_unavailable", row["id"])
+        return
+    _commit_mm_resolution(
+        supabase=supabase,
+        prediction_id=row["id"],
+        open_price=None,
+        close_price=None,
+        outcome="VOID",
+        log=log,
+    )
+
+
+def _commit_mm_resolution(
+    *,
+    supabase: Any,
+    prediction_id: str,
+    open_price: float | None,
+    close_price: float | None,
+    outcome: str,
+    log: logging.Logger,
+) -> None:
+    supabase.table("marketmind_predictions").update({
+        "resolved": True,
+        "outcome": outcome,
+        "open_price": open_price,
+        "close_price": close_price,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", prediction_id).execute()
+    log.info("mm_resolved id=%s outcome=%s", prediction_id, outcome)
 
 
 def _fetch_day_bar(ticker: str, target_date: str) -> tuple[float | None, float | None]:

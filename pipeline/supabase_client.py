@@ -41,6 +41,13 @@ def insert_articles(client: Client, articles: list[dict[str, Any]]) -> None:
     client.table("insight_articles").insert(articles).execute()
 
 
+def upsert_marketmind_prediction(client: Client, payload: dict[str, Any]) -> None:
+    """Upsert MarketMind's verdict for (stock_id, prediction_date)."""
+    client.table("marketmind_predictions").upsert(
+        payload, on_conflict="stock_id,prediction_date"
+    ).execute()
+
+
 def record_source(
     client: Client,
     *,

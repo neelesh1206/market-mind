@@ -9,16 +9,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { TrackRecordBadge } from "@/components/track-record-badge";
+import { createClient } from "@/lib/supabase/server";
+import { fetchTrackRecord } from "@/lib/feed";
+
+export const revalidate = 60; // refresh track-record every minute
 
 /** Inline GitHub mark — Lucide dropped the brand icon. */
 function GithubMark({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.114 2.504.336 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" />
     </svg>
   );
@@ -27,7 +27,7 @@ function GithubMark({ className }: { className?: string }) {
 export const metadata = {
   title: "How MarketMind works",
   description:
-    "How we compute signals, what data sources we use, why we don't show a verdict, and what we don't do.",
+    "How we compute the daily UP/DOWN call, what data sources we use, our published track record, and our honest limitations.",
 };
 
 /**
@@ -35,7 +35,14 @@ export const metadata = {
  * front door for anyone who lands on a shared stock link and wants to know
  * what they're looking at.
  */
-export default function AboutPage() {
+export default async function AboutPage() {
+  // Track-record is public read (anon allowed by RLS).
+  const supabase = await createClient();
+  const [tr30, tr90] = await Promise.all([
+    fetchTrackRecord(supabase, 30),
+    fetchTrackRecord(supabase, 90),
+  ]);
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-border/60 bg-background/60 sticky top-0 z-10 border-b backdrop-blur">
@@ -70,13 +77,37 @@ export default function AboutPage() {
             How MarketMind works
           </p>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
-            We show you the data, <span className="text-muted-foreground">not the answer.</span>
+            Predictions you can <span className="text-muted-foreground">audit.</span>
           </h1>
           <p className="text-muted-foreground max-w-2xl text-base leading-relaxed">
-            MarketMind aggregates 10+ sources into four transparent signals per stock. We
-            deliberately don&apos;t output a single &ldquo;UP or DOWN&rdquo; recommendation —
-            that&apos;s your call to make from the evidence we surface.
+            MarketMind aggregates 10+ sources into four signals per stock, combines them into a
+            daily UP/DOWN call, and publishes the track record so you can see exactly how often
+            we&apos;re right. Every score links back to its sources — no black boxes.
           </p>
+        </section>
+
+        {/* Track record */}
+        <section className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
+          <h2 className="text-base font-semibold">Our track record</h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            MarketMind&apos;s daily verdicts are resolved against actual market close. We publish
+            the score for accountability — small samples are noisy, so we always show the
+            denominator.
+          </p>
+          <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-6">
+            <TrackRecordBadge
+              total={tr30.total}
+              correct={tr30.correct}
+              accuracy={tr30.accuracy}
+              windowLabel="30 days"
+            />
+            <TrackRecordBadge
+              total={tr90.total}
+              correct={tr90.correct}
+              accuracy={tr90.accuracy}
+              windowLabel="90 days"
+            />
+          </div>
         </section>
 
         {/* What we don't do */}
@@ -189,29 +220,38 @@ export default function AboutPage() {
           />
         </section>
 
-        {/* Why no verdict */}
+        {/* How the verdict works */}
         <section className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
-          <h2 className="text-base font-semibold">Why no single &ldquo;UP/DOWN&rdquo; verdict?</h2>
+          <h2 className="text-base font-semibold">How MarketMind&apos;s daily call works</h2>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Combining the four buckets into one number is technically easy — but it would mean:
+            Each day the four bucket scores get combined into a single weighted score:
           </p>
-          <ul className="text-muted-foreground ml-4 list-disc space-y-1 text-sm leading-relaxed">
-            <li>Everyone betting the same direction (kills the prediction-market dynamic)</li>
-            <li>
-              An expectation of accuracy we can&apos;t honestly back without a backtest history
-            </li>
-            <li>A black-box feel that contradicts the transparency we&apos;re going for</li>
-          </ul>
+          <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs leading-relaxed">
+            {`combined = 0.30 * technical
+         + 0.25 * sentiment
+         + 0.30 * professional
+         + 0.15 * social
+
+direction = "UP"      if combined >  0.15
+          | "DOWN"    if combined < -0.15
+          | "NEUTRAL" otherwise
+
+confidence = min(|combined|, 1.0)`}
+          </pre>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            We may bring back a verdict later — but only after a backtest harness has shown material
-            edge over a coin flip, and only with the historical accuracy published alongside it.{" "}
+            NEUTRAL is a legitimate verdict — when buckets disagree we say so, not force a call. The
+            weights are an initial heuristic; as track-record data accumulates, we tune them based
+            on what combinations correlate with WIN outcomes (versioned so accuracy maps to specific
+            weight cohorts).
+          </p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
             <a
-              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0003-no-aggregate-verdict.md"
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0007-verdict-with-track-record.md"
               target="_blank"
               rel="noopener noreferrer"
               className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
             >
-              Read the full reasoning <ExternalLink className="h-3 w-3" aria-hidden />
+              Read ADR 0007 — the full design <ExternalLink className="h-3 w-3" aria-hidden />
             </a>
           </p>
         </section>

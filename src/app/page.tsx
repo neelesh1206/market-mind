@@ -2,10 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
-import { fetchHomeFeed, rankFeed } from "@/lib/feed";
+import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StockCard } from "@/components/stock-card";
+import { TrackRecordBadge } from "@/components/track-record-badge";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -24,8 +25,12 @@ export default async function Home() {
     redirect("/onboarding");
   }
 
-  // Fetch latest insights + top articles for the watchlist
-  const feed = rankFeed(await fetchHomeFeed(supabase, watchlist));
+  // Fetch latest insights + top articles for the watchlist + track record
+  const [feedUnsorted, trackRecord] = await Promise.all([
+    fetchHomeFeed(supabase, watchlist),
+    fetchTrackRecord(supabase, 30),
+  ]);
+  const feed = rankFeed(feedUnsorted);
 
   const { data: profile } = await supabase
     .from("user_profiles")
@@ -88,11 +93,19 @@ export default async function Home() {
 
       {/* Main */}
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-6 py-10">
-        <section className="space-y-1">
+        <section className="space-y-2">
           <p className="text-muted-foreground text-sm">
             Welcome back, <span className="text-foreground font-medium">{name}</span>
           </p>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Today&apos;s feed</h1>
+          <div className="pt-1">
+            <TrackRecordBadge
+              total={trackRecord.total}
+              correct={trackRecord.correct}
+              accuracy={trackRecord.accuracy}
+              windowLabel="30 days"
+            />
+          </div>
         </section>
 
         {/* Quick stats row */}

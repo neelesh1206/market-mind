@@ -1,6 +1,6 @@
 # ADR 0003 — No UP/DOWN verdict, show signals only
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0007 — Verdict with published track record](0007-verdict-with-track-record.md)
 **Date:** 2026-05-18
 
 ## Context

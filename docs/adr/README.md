@@ -12,9 +12,11 @@ Format follows [Michael Nygard's ADR pattern](https://cognitect.com/blog/2011/11
 |---|-------|--------|
 | [0001](0001-documentation-as-rule.md) | Documentation discipline as a project rule | Accepted |
 | [0002](0002-supabase-over-neon.md) | Supabase over Neon for the database | Accepted |
-| [0003](0003-no-aggregate-verdict.md) | No UP/DOWN verdict — show signals only | Accepted |
+| [0003](0003-no-aggregate-verdict.md) | No UP/DOWN verdict — show signals only | Superseded by 0007 |
 | [0004](0004-github-actions-for-pipeline.md) | GitHub Actions over a Python service for the pipeline | Accepted |
 | [0005](0005-massive-as-primary-data-source.md) | Massive (formerly Polygon.io) as primary data source | Accepted |
+| [0006](0006-migrations-via-github-actions.md) | Migrations via GitHub Actions | Accepted |
+| [0007](0007-verdict-with-track-record.md) | Verdict with published track record (supersedes 0003) | Accepted |
 
 ---
 

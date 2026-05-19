@@ -60,6 +60,7 @@ from .processors.sentiment import (
     cross_source_agreement,
 )
 from .processors.summarizer import LlamaSummarizer
+from .processors.verdict import VerdictReasoner, compute_verdict
 from .supabase_client import (
     complete_pipeline_run,
     fetch_active_stocks,
@@ -67,6 +68,7 @@ from .supabase_client import (
     make_client,
     record_source,
     start_pipeline_run,
+    upsert_marketmind_prediction,
     upsert_stock_insight,
 )
 from .trading_calendar import next_trading_day
@@ -150,9 +152,20 @@ async def run(args: argparse.Namespace) -> int:
     sentiment_processor = (
         FinBertSentimentProcessor(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
     )
-    summarizer = (
-        LlamaSummarizer(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
-    )
+    summarizer = LlamaSummarizer(cfg.huggingface_api_key) if cfg.huggingface_api_key else None
+
+    # Verdict reasoner uses the same model/provider as the summarizer.
+    import os as _os
+
+    verdict_reasoner = None
+    if cfg.huggingface_api_key:
+        verdict_reasoner = VerdictReasoner(
+            cfg.huggingface_api_key,
+            model=_os.getenv(
+                "HUGGINGFACE_SUMMARY_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"
+            ),
+            provider=_os.getenv("HUGGINGFACE_PROVIDER", "auto"),
+        )
 
     # Market-wide macro: fetch once.
     macro: MacroSnapshot | None = None
@@ -183,6 +196,7 @@ async def run(args: argparse.Namespace) -> int:
                 reddit_fetcher=reddit_fetcher,
                 sentiment_processor=sentiment_processor,
                 summarizer=summarizer,
+                verdict_reasoner=verdict_reasoner,
                 macro=macro,
                 stats=stats,
                 log=log,
@@ -236,6 +250,7 @@ async def _process_stock(
     reddit_fetcher: Any | None,
     sentiment_processor: FinBertSentimentProcessor | None,
     summarizer: LlamaSummarizer | None,
+    verdict_reasoner: VerdictReasoner | None,
     macro: MacroSnapshot | None,
     stats: dict[str, Any],
     log: logging.Logger,
@@ -389,6 +404,49 @@ async def _process_stock(
             latency_ms=result.latency_ms,
             error_detail=result.error,
         )
+
+    # MarketMind verdict — combines the 4 bucket scores into UP/DOWN/NEUTRAL.
+    # See ADR 0007. Stored in marketmind_predictions so the resolution job
+    # can score it like a user prediction and build a public track record.
+    verdict = compute_verdict(
+        technical=buckets.technical,
+        sentiment=buckets.sentiment,
+        professional=buckets.professional,
+        social=buckets.social,
+    )
+    reasoning: str | None = None
+    if verdict_reasoner:
+        try:
+            reasoning = await asyncio.to_thread(
+                verdict_reasoner.explain, ticker=stock.ticker, verdict=verdict
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("verdict_reasoner_failed ticker=%s err=%s", stock.ticker, e)
+    if reasoning is None:
+        # Fallback to the rule-based explainer baked into verdict.py
+        from .processors.verdict import _fallback_reasoning
+
+        reasoning = _fallback_reasoning(verdict)
+
+    upsert_marketmind_prediction(
+        supabase,
+        {
+            "insight_id": insight_id,
+            "stock_id": stock.id,
+            "prediction_date": target_date,
+            "direction": verdict.direction,
+            "confidence": verdict.confidence,
+            "reasoning": reasoning,
+            "bucket_scores": verdict.bucket_scores,
+            "weights_version": verdict.weights_version,
+        },
+    )
+    log.info(
+        "verdict ticker=%s direction=%s confidence=%.2f",
+        stock.ticker,
+        verdict.direction,
+        verdict.confidence,
+    )
 
 
 def _build_social(

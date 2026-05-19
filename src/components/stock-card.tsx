@@ -5,6 +5,7 @@ import { AnalystBar } from "@/components/analyst-bar";
 import { SignalBar } from "@/components/signal-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { VerdictChip } from "@/components/verdict-chip";
 import { cn } from "@/lib/utils";
 import type { StockCardData } from "@/types/insight";
 
@@ -22,7 +23,7 @@ type Props = {
  * intentionally dense-but-scannable — every row earns its place.
  */
 export function StockCard({ data }: Props) {
-  const { stock, insight, topArticle } = data;
+  const { stock, insight, topArticle, verdict } = data;
 
   return (
     <article
@@ -104,6 +105,13 @@ export function StockCard({ data }: Props) {
           detail={socialDetail(insight)}
         />
       </section>
+
+      {/* Verdict chip — MarketMind's read for the day */}
+      {verdict && (
+        <section className="border-border/40 border-t px-5 py-3">
+          <VerdictChip verdict={verdict} showReasoning />
+        </section>
+      )}
 
       {/* Analyst rating bar — only when we have data */}
       {insight && (insight.analyst_buy || insight.analyst_hold || insight.analyst_sell) && (

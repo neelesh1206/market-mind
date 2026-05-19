@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { InsightArticle, StockCardData, StockInsight } from "@/types/insight";
+import type {
+  InsightArticle,
+  MarketMindPrediction,
+  StockCardData,
+  StockInsight,
+} from "@/types/insight";
 
 /**
  * For a user's watchlist, fetch the most-recent stock_insight per stock plus
@@ -45,26 +50,63 @@ export async function fetchHomeFeed(
   // Fetch top articles (display_rank=1) for those insights in one round-trip.
   const insightIds = Array.from(latestByStock.values()).map((i) => i.id);
   const articleByInsight = new Map<string, InsightArticle>();
+  const verdictByStock = new Map<string, MarketMindPrediction>();
   if (insightIds.length > 0) {
-    const { data: articleRows, error: articleErr } = await client
-      .from("insight_articles")
-      .select("*")
-      .in("insight_id", insightIds)
-      .eq("display_rank", 1);
-
-    if (articleErr) {
-      throw new Error(`fetchHomeFeed articles: ${articleErr.message}`);
+    const [articlesRes, verdictsRes] = await Promise.all([
+      client
+        .from("insight_articles")
+        .select("*")
+        .in("insight_id", insightIds)
+        .eq("display_rank", 1),
+      client.from("marketmind_predictions").select("*").in("insight_id", insightIds),
+    ]);
+    if (articlesRes.error) {
+      throw new Error(`fetchHomeFeed articles: ${articlesRes.error.message}`);
     }
-    for (const row of (articleRows ?? []) as InsightArticle[]) {
+    if (verdictsRes.error) {
+      throw new Error(`fetchHomeFeed verdicts: ${verdictsRes.error.message}`);
+    }
+    for (const row of (articlesRes.data ?? []) as InsightArticle[]) {
       articleByInsight.set(row.insight_id, row);
+    }
+    for (const row of (verdictsRes.data ?? []) as MarketMindPrediction[]) {
+      verdictByStock.set(row.stock_id, row);
     }
   }
 
   return watchlistStocks.map((stock) => {
     const insight = latestByStock.get(stock.id) ?? null;
     const topArticle = insight ? (articleByInsight.get(insight.id) ?? null) : null;
-    return { stock, insight, topArticle };
+    const verdict = verdictByStock.get(stock.id) ?? null;
+    return { stock, insight, topArticle, verdict };
   });
+}
+
+/**
+ * Track-record stats across all resolved MarketMind predictions.
+ * Always include sample size — small samples are noisy.
+ */
+export async function fetchTrackRecord(
+  client: SupabaseClient,
+  windowDays = 30,
+): Promise<{ total: number; correct: number; accuracy: number | null }> {
+  const since = new Date(Date.now() - windowDays * 86400_000).toISOString().slice(0, 10);
+
+  const { data, error } = await client
+    .from("marketmind_predictions")
+    .select("outcome")
+    .eq("resolved", true)
+    .gte("prediction_date", since)
+    .neq("outcome", "VOID");
+
+  if (error) {
+    throw new Error(`fetchTrackRecord: ${error.message}`);
+  }
+  const rows = data ?? [];
+  const total = rows.length;
+  const correct = rows.filter((r: { outcome: string | null }) => r.outcome === "WIN").length;
+  const accuracy = total > 0 ? correct / total : null;
+  return { total, correct, accuracy };
 }
 
 /**

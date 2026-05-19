@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { InsightArticle, StockInsight } from "@/types/insight";
+import type { InsightArticle, MarketMindPrediction, StockInsight } from "@/types/insight";
 
 export type StockDetail = {
   stock: {
@@ -13,6 +13,7 @@ export type StockDetail = {
   };
   insight: StockInsight | null;
   articles: InsightArticle[];
+  verdict: MarketMindPrediction | null;
 };
 
 /**
@@ -52,21 +53,30 @@ export async function fetchStockDetail(
   const insight = ((insightRows ?? []) as StockInsight[])[0] ?? null;
 
   let articles: InsightArticle[] = [];
+  let verdict: MarketMindPrediction | null = null;
   if (insight) {
-    const { data: articleRows, error: articleErr } = await client
-      .from("insight_articles")
-      .select("*")
-      .eq("insight_id", insight.id)
-      .order("display_rank", { ascending: true, nullsFirst: false });
-    if (articleErr) {
-      throw new Error(`fetchStockDetail articles: ${articleErr.message}`);
+    const [articlesRes, verdictRes] = await Promise.all([
+      client
+        .from("insight_articles")
+        .select("*")
+        .eq("insight_id", insight.id)
+        .order("display_rank", { ascending: true, nullsFirst: false }),
+      client.from("marketmind_predictions").select("*").eq("insight_id", insight.id).maybeSingle(),
+    ]);
+    if (articlesRes.error) {
+      throw new Error(`fetchStockDetail articles: ${articlesRes.error.message}`);
     }
-    articles = (articleRows ?? []) as InsightArticle[];
+    if (verdictRes.error) {
+      throw new Error(`fetchStockDetail verdict: ${verdictRes.error.message}`);
+    }
+    articles = (articlesRes.data ?? []) as InsightArticle[];
+    verdict = (verdictRes.data as MarketMindPrediction | null) ?? null;
   }
 
   return {
     stock: stockRow,
     insight,
     articles,
+    verdict,
   };
 }
