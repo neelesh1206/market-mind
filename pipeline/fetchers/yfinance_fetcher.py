@@ -18,6 +18,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator
 from ta.volatility import BollingerBands
 
+from ._normalize import to_yahoo_symbol
 from .base import AbstractFetcher
 from .types import PriceSnapshot
 
@@ -102,7 +103,7 @@ class YFinancePriceFetcher(AbstractFetcher[PriceSnapshot]):
     def _download(self, ticker: str) -> pd.DataFrame:
         session = self._get_session()
         return yf.download(
-            ticker,
+            to_yahoo_symbol(ticker),
             period="1y",
             interval="1d",
             progress=False,

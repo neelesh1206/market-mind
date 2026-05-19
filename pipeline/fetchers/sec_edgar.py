@@ -22,6 +22,7 @@ from typing import Any
 
 import httpx
 
+from ._normalize import to_yahoo_symbol
 from .base import AbstractFetcher, RateLimitError
 from .types import InsiderSnapshot
 
@@ -86,7 +87,9 @@ class SecInsiderFetcher(AbstractFetcher[InsiderSnapshot]):
     async def _fetch_impl(self, ticker: str) -> InsiderSnapshot:
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             ticker_map = await _load_ticker_map(client)
-            cik = ticker_map.get(ticker.upper())
+            # SEC's company_tickers.json canonicalizes on the dash form for
+            # class shares (BRK-B, BF-B), so normalize the lookup key.
+            cik = ticker_map.get(to_yahoo_symbol(ticker).upper())
             if not cik:
                 log.warning("sec_no_cik ticker=%s", ticker)
                 return InsiderSnapshot(activity="neutral", detail=None, has_recent_8k=False)

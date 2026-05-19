@@ -35,6 +35,7 @@ import pandas as pd
 import yfinance as yf
 
 from .config import load_config
+from .fetchers._normalize import to_yahoo_symbol
 from .observability import init_logging, init_sentry
 from .supabase_client import (
     complete_pipeline_run,
@@ -335,7 +336,7 @@ def _fetch_day_bar(ticker: str, target_date: str) -> tuple[float | None, float |
         session = None
 
     df: pd.DataFrame = yf.download(
-        ticker,
+        to_yahoo_symbol(ticker),
         start=target_date,
         end=_next_day(target_date),
         interval="1d",
@@ -378,7 +379,7 @@ def _fetch_mm_prices(
     ).isoformat()
 
     df: pd.DataFrame = yf.download(
-        ticker,
+        to_yahoo_symbol(ticker),
         start=start,
         end=_next_day(target_date),
         interval="1d",

@@ -1,0 +1,104 @@
+name: Playwright Smoke
+
+# Runs Playwright smoke tests against deployed builds, not a local dev server.
+# Why: we want to catch production-bundle regressions (env-var inlining, OG
+# edge runtime, hydration mismatches that only show in `next build` output)
+# that a `next dev` server would mask.
+#
+# Trigger model:
+#   - On PR: tests against the Vercel preview URL (the Vercel GitHub
+#     integration posts the preview comment; we read it from the deployment
+#     status API). Falls back to prod if no preview is ready.
+#   - On push to main: tests against the production URL after Vercel has
+#     promoted the new build.
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "pipeline/**"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "pipeline/**"
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Override target URL (defaults to production)."
+        required: false
+        type: string
+
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Public surface smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for Vercel preview (PR only)
+        if: github.event_name == 'pull_request'
+        # Vercel posts a deployment-status with a preview URL once the
+        # build finishes. We give it up to 5 min then proceed against
+        # the URL (or fall back to prod if it never lands).
+        id: vercel
+        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
+        continue-on-error: true
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          max_timeout: 300
+
+      - name: Choose target URL
+        id: target
+        run: |
+          if [ -n "${{ inputs.target_url }}" ]; then
+            echo "url=${{ inputs.target_url }}" >> $GITHUB_OUTPUT
+            echo "Using workflow input URL"
+          elif [ -n "${{ steps.vercel.outputs.url }}" ]; then
+            echo "url=${{ steps.vercel.outputs.url }}" >> $GITHUB_OUTPUT
+            echo "Using Vercel preview URL: ${{ steps.vercel.outputs.url }}"
+          else
+            echo "url=https://marketmind.neeleshkakaraparthi.dev" >> $GITHUB_OUTPUT
+            echo "Falling back to production URL"
+          fi
+
+      - name: Run Playwright
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.url }}
+        run: npx playwright test --project=chromium
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

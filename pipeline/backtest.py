@@ -39,6 +39,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from .fetchers._normalize import to_yahoo_symbol
 from .fetchers.yfinance_fetcher import (
     _classify_bollinger,
     _classify_macd,
@@ -77,7 +78,7 @@ def _download_history(ticker: str, months: int) -> pd.DataFrame:
     """Daily OHLCV for `months` months back plus enough warmup for 50-day MA."""
     start = (date.today() - timedelta(days=int(months * 31) + 90)).isoformat()
     df = yf.download(
-        ticker,
+        to_yahoo_symbol(ticker),
         start=start,
         interval="1d",
         progress=False,
