@@ -108,13 +108,10 @@ jobs:
       - name: Pytest + coverage
         # cov for the pipeline source only. Threshold low to start; ratchet
         # up as #133 lands more tests. --cov-fail-under enforces it in CI.
-        run: |
-          pytest pipeline/tests/ \
-            --cov=pipeline \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-fail-under=0
+        # Invoked with `python -m pytest` so the repo root is on sys.path —
+        # the tests import as `from pipeline.X`, which fails under bare
+        # `pytest` because pyproject.toml inside pipeline/ resets rootdir.
+        run: python -m pytest pipeline/tests/ --cov=pipeline --cov-report=term-missing --cov-report=xml --cov-report=html --cov-fail-under=0
 
       - name: Upload coverage artifact
         if: always()
@@ -128,19 +125,21 @@ jobs:
 
       - name: Coverage summary in job log
         if: always()
+        # Pipe the Python script via stdin to dodge the YAML-indentation-vs-
+        # Python-indentation hell of `python -c "..."` inside a `run: |` block.
         run: |
           if [ -f coverage.xml ]; then
             echo "### Python coverage" >> $GITHUB_STEP_SUMMARY
-            python -c "
-            import xml.etree.ElementTree as ET
-            tree = ET.parse('coverage.xml')
-            root = tree.getroot()
-            line_rate = float(root.attrib.get('line-rate', 0)) * 100
-            branch_rate = float(root.attrib.get('branch-rate', 0)) * 100
-            print(f'')
-            print(f'| Metric | % |')
-            print(f'|---|---|')
-            print(f'| Lines | {line_rate:.1f}% |')
-            print(f'| Branches | {branch_rate:.1f}% |')
-            " >> $GITHUB_STEP_SUMMARY
+            python <<'PY' >> $GITHUB_STEP_SUMMARY
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          root = tree.getroot()
+          line_rate = float(root.attrib.get('line-rate', 0)) * 100
+          branch_rate = float(root.attrib.get('branch-rate', 0)) * 100
+          print('')
+          print('| Metric | % |')
+          print('|---|---|')
+          print(f'| Lines | {line_rate:.1f}% |')
+          print(f'| Branches | {branch_rate:.1f}% |')
+          PY
           fi

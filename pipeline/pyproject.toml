@@ -6,8 +6,12 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["."]
+# Repo root on sys.path so the tests' `from pipeline.X` imports resolve.
+# `.` (pipeline/) would only let `from fetchers.X` work; every test uses
+# the fully-qualified `from pipeline.fetchers.X` form.
+pythonpath = [".."]
 
 [tool.ruff]
 line-length = 100
