@@ -64,17 +64,17 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Wait for Vercel preview (PR only)
-        if: github.event_name == 'pull_request'
-        # Vercel posts a deployment-status with a preview URL once the
-        # build finishes. We give it up to 5 min then proceed against
-        # the URL (or fall back to prod if it never lands).
+      - name: Wait for Vercel preview (PR + push)
+        # Vercel posts a deployment-status with a URL once the build finishes
+        # — works for both preview (PRs) and production (push to main). Without
+        # this wait, push events race the deploy and we test the OLD bundle.
+        # Up to 6 min; if it never lands we fall back to the prod URL below.
         id: vercel
         uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
         continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          max_timeout: 300
+          max_timeout: 360
 
       - name: Choose target URL
         id: target
@@ -84,11 +84,32 @@ jobs:
             echo "Using workflow input URL"
           elif [ -n "${{ steps.vercel.outputs.url }}" ]; then
             echo "url=${{ steps.vercel.outputs.url }}" >> $GITHUB_OUTPUT
-            echo "Using Vercel preview URL: ${{ steps.vercel.outputs.url }}"
+            echo "Using Vercel-reported URL: ${{ steps.vercel.outputs.url }}"
           else
             echo "url=https://marketmind.neeleshkakaraparthi.dev" >> $GITHUB_OUTPUT
             echo "Falling back to production URL"
           fi
+
+      - name: Verify deploy actually serves the new build
+        # Belt + suspenders: even after the deployment-status fires, the CDN
+        # can take ~30s to propagate. Poll a known route until it serves the
+        # expected content-type. Catches the race where Vercel reports
+        # "deployment ready" but the edge node we hit is still serving the
+        # previous build. Bails after 90s; tests will then catch any real
+        # regression as before.
+        env:
+          TARGET: ${{ steps.target.outputs.url }}
+        run: |
+          for i in {1..18}; do
+            ct=$(curl -sI "${TARGET}/og/stock/AAPL" | grep -i '^content-type:' | head -1 | tr -d '\r' || true)
+            if echo "$ct" | grep -qi "image/png"; then
+              echo "Deploy live (attempt $i): $ct"
+              exit 0
+            fi
+            echo "Attempt $i: $ct — waiting 5s..."
+            sleep 5
+          done
+          echo "::warning::OG endpoint never returned image/png after 90s; running tests anyway."
 
       - name: Run Playwright
         env:

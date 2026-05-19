@@ -312,18 +312,19 @@ export default async function AboutPage() {
             icon={MessageSquare}
             title="Social"
             color="text-rose-500"
-            description="What retail traders are saying — both the wisdom of crowds and the noise."
+            description="What retail traders are saying — weighted against the herd effect. The academic literature is clear that retail attention spikes precede underperformance for non-meme tickers (Barber & Odean 2008; Da, Engelberg & Gao 2011), so we fade the crowd rather than follow it."
             sources={[
               "StockTwits (bullish/bearish ratio from tagged messages)",
               "ApeWisdom (r/wallstreetbets mention aggregation)",
               "Reddit API (when configured)",
             ]}
             inputs={[
-              "StockTwits bullish percentage among tagged messages",
-              "ApeWisdom rank in top-mentioned tickers",
-              "Reddit mention delta vs 7-day average",
+              "Reddit mention delta vs 7-day average → fade signal at spikes",
+              "ApeWisdom rank in top-mentioned tickers → fade signal at top-10",
+              "StockTwits bullish percentage → directional signal, but damped when message volume is high",
+              "Herding intensity (0..1) computed from the above, damps the directional read further when the crowd is loud",
             ]}
-            formula="Bullish ratio (centered at 50%) plus mention-spike bonus, capped to avoid memestock distortion."
+            formula="Herding contribution is negative (fade the crowd); StockTwits bullish ratio contributes positively, scaled down when message count is high or when herding intensity is at peak. See ADR 0013 for the academic basis and exact magnitudes."
           />
         </section>
 

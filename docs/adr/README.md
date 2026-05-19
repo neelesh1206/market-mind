@@ -22,6 +22,7 @@ Format follows [Michael Nygard's ADR pattern](https://cognitect.com/blog/2011/11
 | [0010](0010-postgres-over-redis-for-seen-state.md) | Postgres column over Redis for "seen reveal" state | Accepted |
 | [0011](0011-signal-quality-p0-fixes.md) | Signal-quality P0 fixes (resolution window, PIT filter, weight renormalization) | Accepted |
 | [0012](0012-local-finbert-and-hf-breaker.md) | Local FinBERT + circuit breaker for the LLM-side HF calls | Accepted |
+| [0013](0013-social-bucket-fade-the-crowd.md) | Social bucket: fade the crowd, weight informed sentiment | Accepted |
 
 ---
 
