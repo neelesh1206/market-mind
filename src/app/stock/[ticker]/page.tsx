@@ -15,7 +15,7 @@ import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
 import { fetchBetsForTradingDay } from "@/lib/bets";
 import { fetchDailyBars } from "@/lib/price-history";
-import { getMarketSchedule } from "@/lib/market-schedule";
+import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { BetCta } from "@/components/bet-cta";
 import { StockSparkline } from "@/components/stock-sparkline";
 import { cn } from "@/lib/utils";
@@ -439,6 +439,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
             betWindowClosesAt={schedule.betWindowClosesAt}
             betWindowOpensAt={schedule.betWindowOpensAt}
             resolutionAt={schedule.resolutionAt}
+            todayEt={etCalendarDate()}
             size="lg"
           />
         </section>

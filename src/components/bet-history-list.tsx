@@ -2,13 +2,20 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Clock, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, Clock, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
+import { isStuckPrediction } from "@/lib/bets";
 import type { BetHistoryRow } from "@/lib/bets";
 
 type Props = {
   rows: BetHistoryRow[];
+  /**
+   * Today's ET calendar date (YYYY-MM-DD). Passed from the server so the
+   * "delayed" derivation matches the rest of the app's ET-aware semantics
+   * and stays consistent across hydration.
+   */
+  todayEt: string;
 };
 
 type Filter = "all" | "pending" | "resolved";
@@ -26,7 +33,11 @@ const FILTERS: { key: Filter; label: string }[] = [
  * page-render time. Past that we'd want server-side pagination, but 200 is
  * months of daily play for a casual user — fine for the MVP.
  */
-export function BetHistoryList({ rows }: Props) {
+export function BetHistoryList({ rows, todayEt }: Props) {
+  const delayedCount = useMemo(
+    () => rows.filter((r) => isStuckPrediction(r, todayEt)).length,
+    [rows, todayEt],
+  );
   const [filter, setFilter] = useState<Filter>("all");
 
   const visible = useMemo(() => {
@@ -58,6 +69,23 @@ export function BetHistoryList({ rows }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* Delayed-bets banner — surfaces when a cron failure or weekend bet
+          has left predictions sitting past their resolution date. The user's
+          stake is still safe (refundable via manual workflow re-run); this
+          just makes the situation visible rather than silently stuck. */}
+      {delayedCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-600">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            <span className="font-semibold">
+              {delayedCount} {delayedCount === 1 ? "bet is" : "bets are"} awaiting resolution.
+            </span>{" "}
+            Your stake is safe — we&apos;re investigating and will resolve automatically once
+            the pipeline catches up.
+          </span>
+        </div>
+      )}
+
       {/* Filter chips */}
       <div className="flex flex-wrap gap-1.5">
         {FILTERS.map(({ key, label }) => (
@@ -93,7 +121,7 @@ export function BetHistoryList({ rows }: Props) {
       ) : (
         <ul className="divide-border/40 border-border/60 bg-card/30 divide-y rounded-xl border">
           {visible.map((row) => (
-            <BetRow key={row.id} row={row} />
+            <BetRow key={row.id} row={row} todayEt={todayEt} />
           ))}
         </ul>
       )}
@@ -101,12 +129,12 @@ export function BetHistoryList({ rows }: Props) {
   );
 }
 
-function BetRow({ row }: { row: BetHistoryRow }) {
+function BetRow({ row, todayEt }: { row: BetHistoryRow; todayEt: string }) {
   const DirectionIcon = row.direction === "UP" ? ArrowUp : ArrowDown;
   const directionTone =
     row.direction === "UP" ? "text-emerald-600" : "text-rose-600";
 
-  const status = statusFor(row);
+  const status = statusFor(row, todayEt);
   const net = row.payout !== null ? row.payout - row.credits_wagered : null;
 
   return (
@@ -174,12 +202,25 @@ function BetRow({ row }: { row: BetHistoryRow }) {
   );
 }
 
-function statusFor(row: BetHistoryRow): {
+function statusFor(
+  row: BetHistoryRow,
+  todayEt: string,
+): {
   label: string;
   className: string;
   icon: React.ReactNode;
 } {
   if (!row.resolved) {
+    // "Delayed" gets stronger amber + AlertCircle icon to distinguish from
+    // normal-pending. Both share the same DB state — the difference is
+    // purely whether the trading day has passed.
+    if (isStuckPrediction(row, todayEt)) {
+      return {
+        label: "Delayed",
+        className: "border-amber-500/60 bg-amber-500/20 text-amber-600",
+        icon: <AlertCircle className="h-2.5 w-2.5" aria-hidden />,
+      };
+    }
     return {
       label: "Pending",
       className: "border-amber-500/40 bg-amber-500/10 text-amber-600",

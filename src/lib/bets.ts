@@ -1,5 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/**
+ * A prediction is "stuck" when its trading day has passed but the resolution
+ * job hasn't marked it resolved. Indicates either a cron failure, a Yahoo
+ * price-data hiccup, or a weekend bet that fell outside the Mon-Fri schedule.
+ *
+ * The check is calendar-date-only (no time-of-day comparison) because the
+ * resolution cron fires at 21:15 UTC = 4:15 PM ET, so by the next ET day
+ * any unresolved bet for yesterday's date is overdue.
+ *
+ * Pure helper — takes the ET today date so the UI render path and the helper
+ * stay deterministic without each calling `getMarketSchedule()` separately.
+ */
+export function isStuckPrediction(
+  bet: { prediction_date: string; resolved: boolean },
+  todayEt: string,
+): boolean {
+  return !bet.resolved && bet.prediction_date < todayEt;
+}
+
 export type Prediction = {
   id: string;
   user_id: string;

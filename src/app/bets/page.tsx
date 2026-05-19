@@ -8,6 +8,7 @@ import {
   fetchUserBetHistory,
 } from "@/lib/bets";
 import { fetchUserWatchlist } from "@/lib/watchlist";
+import { etCalendarDate } from "@/lib/market-schedule";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BetHistoryList } from "@/components/bet-history-list";
@@ -48,6 +49,7 @@ export default async function BetsPage() {
   const credits = profile?.credit_balance ?? 0;
   const name = profile?.display_name ?? email;
   const stats = computeBetStats(history);
+  const todayEt = etCalendarDate();
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -123,7 +125,7 @@ export default async function BetsPage() {
           </TabsList>
 
           <TabsContent value="bets" className="space-y-3">
-            <BetHistoryList rows={history} />
+            <BetHistoryList rows={history} todayEt={todayEt} />
           </TabsContent>
 
           <TabsContent value="credits" className="space-y-3">

@@ -20,6 +20,8 @@ type Props = {
   userCredits?: number;
   /** Market schedule snapshot driving the CTA's three states (chip / button / closed-label). */
   schedule?: MarketSchedule;
+  /** Today's ET calendar date (YYYY-MM-DD). Passed through to BetCta for stuck-bet derivation. */
+  todayEt?: string;
   /**
    * Preview mode for the logged-out /login page. When true:
    *   - bet CTA becomes a "Sign in to bet →" link to /login
@@ -37,7 +39,7 @@ type Props = {
  * The full per-signal breakdown lives on /stock/[ticker]. This card is
  * intentionally dense-but-scannable — every row earns its place.
  */
-export function StockCard({ data, userBet, userCredits, schedule, preview }: Props) {
+export function StockCard({ data, userBet, userCredits, schedule, todayEt, preview }: Props) {
   const { stock, insight, topArticle, verdict } = data;
   const detailHref = `/stock/${stock.ticker}`;
 
@@ -231,6 +233,7 @@ export function StockCard({ data, userBet, userCredits, schedule, preview }: Pro
               betWindowClosesAt={schedule.betWindowClosesAt}
               betWindowOpensAt={schedule.betWindowOpensAt}
               resolutionAt={schedule.resolutionAt}
+              todayEt={todayEt ?? schedule.tradingDayLabel}
               size="sm"
             />
           )

@@ -161,6 +161,7 @@ export default async function Home() {
                   userBet={betsByStockId[card.stock.id] ?? null}
                   userCredits={credits}
                   schedule={schedule}
+                  todayEt={todayEt}
                 />
               ))}
             </div>

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, CheckCircle2, Clock, Lock, Pencil } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Clock, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BetSheet } from "@/components/bet-sheet";
 import { cn } from "@/lib/utils";
 import { formatET, formatRelative } from "@/lib/market-schedule";
-import type { Prediction } from "@/lib/bets";
+import { isStuckPrediction, type Prediction } from "@/lib/bets";
 import type { MarketMindPrediction } from "@/types/insight";
 
 type Stock = { id: string; ticker: string; name: string };
@@ -23,6 +23,12 @@ type Props = {
   betWindowOpensAt: Date;
   /** When today's bets resolve. Used for the locked-in chip after the window closes. */
   resolutionAt: Date;
+  /**
+   * Today's ET calendar date (YYYY-MM-DD). Used to derive whether an
+   * existing bet is past its resolution date but still unresolved — drives
+   * the "Resolution delayed" UI variant of the chip.
+   */
+  todayEt: string;
   /** "sm" for card footer, "lg" for the detail-page section. */
   size?: "sm" | "lg";
 };
@@ -45,10 +51,12 @@ export function BetCta({
   betWindowClosesAt,
   betWindowOpensAt,
   resolutionAt,
+  todayEt,
   size = "sm",
 }: Props) {
   const [open, setOpen] = useState(false);
   const cancellable = !!userBet && betWindowOpen;
+  const stuck = !!userBet && isStuckPrediction(userBet, todayEt);
 
   // State 1: already bet today. Chip is clickable IFF the window is still open
   // (so the user can cancel); after lock it's a passive status indicator.
@@ -59,6 +67,7 @@ export function BetCta({
           bet={userBet}
           betWindowOpen={betWindowOpen}
           resolutionAt={resolutionAt}
+          stuck={stuck}
           size={size}
           onClick={cancellable ? () => setOpen(true) : undefined}
         />
@@ -125,19 +134,25 @@ function LockedInChip({
   bet,
   betWindowOpen,
   resolutionAt,
+  stuck,
   size,
   onClick,
 }: {
   bet: Prediction;
   betWindowOpen: boolean;
   resolutionAt: Date;
+  /** True when prediction_date has passed but resolved is still false. */
+  stuck: boolean;
   size: "sm" | "lg";
   /** When provided, the chip renders as a button (cancellable). */
   onClick?: () => void;
 }) {
   const Icon = bet.direction === "UP" ? ArrowUp : ArrowDown;
-  const tone =
-    bet.direction === "UP"
+  // Stuck chips override the direction tone with amber — the resolution
+  // state is the most important fact to surface, not which way the user bet.
+  const tone = stuck
+    ? "border-amber-500/50 bg-amber-500/15 text-amber-600"
+    : bet.direction === "UP"
       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600"
       : "border-rose-500/40 bg-rose-500/10 text-rose-600";
 
@@ -170,8 +185,17 @@ function LockedInChip({
         <span className={cn(size === "lg" ? "text-sm" : "text-xs")}>· {bet.credits_wagered}</span>
       </div>
       <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px] font-normal">
-        <Lock className="h-3 w-3" aria-hidden />
-        {betWindowOpen ? "Cancel before 1 PM" : `Resolves ${formatRelative(resolutionAt)}`}
+        {stuck ? (
+          <>
+            <AlertCircle className="h-3 w-3 text-amber-600" aria-hidden />
+            Resolution delayed
+          </>
+        ) : (
+          <>
+            <Lock className="h-3 w-3" aria-hidden />
+            {betWindowOpen ? "Cancel before 1 PM" : `Resolves ${formatRelative(resolutionAt)}`}
+          </>
+        )}
       </span>
     </>
   );
