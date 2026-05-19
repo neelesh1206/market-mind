@@ -16,6 +16,7 @@ import { Slider } from "@/components/ui/slider";
 import { VerdictChip } from "@/components/verdict-chip";
 import { cn } from "@/lib/utils";
 import { cancelBet, placeBet } from "@/app/actions/bets";
+import { haptic } from "@/lib/haptics";
 import { formatET, formatRelative, formatResolutionCopy } from "@/lib/market-schedule";
 import type { Prediction } from "@/lib/bets";
 import type { MarketMindPrediction } from "@/types/insight";
@@ -151,8 +152,10 @@ function PlaceBody({
       const result = await placeBet({ stockId: stock.id, direction, credits });
       if (!result.ok) {
         setError(result.error);
+        haptic("warning");
         return;
       }
+      haptic("tap");
       toast.success(`Bet placed · ${credits} on ${direction}`, {
         description: `${stock.ticker} · ${formatResolutionCopy(resolutionAt)}`,
       });
@@ -328,8 +331,10 @@ function ManageBody({
       if (!result.ok) {
         setError(result.error);
         setConfirming(false);
+        haptic("warning");
         return;
       }
+      haptic("double");
       toast.success(`Bet cancelled`, {
         description: `${stock.ticker} · ${existingBet.credits_wagered} credits refunded`,
       });

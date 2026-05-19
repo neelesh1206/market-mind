@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { claimDailyBonus } from "@/app/actions/bonus";
+import { haptic } from "@/lib/haptics";
 import type { DailyBonusStatus } from "@/lib/bonus";
 
 type Props = {
@@ -32,10 +33,13 @@ export function DailyBonusCard({ status }: Props) {
       const result = await claimDailyBonus();
       if (!result.ok) {
         toast.error(result.error);
+        haptic("warning");
         return;
       }
       setClaimed(true);
       setStreakAfterClaim(result.newStreak);
+      // Stronger pattern when the streak grew — the daily ritual landing.
+      haptic(result.newStreak > 1 ? "success" : "tap");
       toast.success(
         result.newStreak > 1
           ? `Day ${result.newStreak} streak! · +${result.creditsAwarded} credits`

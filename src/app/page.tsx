@@ -13,6 +13,7 @@ import { StockCard } from "@/components/stock-card";
 import { TrackRecordBadge } from "@/components/track-record-badge";
 import { DailyBonusCard } from "@/components/daily-bonus-card";
 import { ResultRevealModal } from "@/components/result-reveal-modal";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -59,10 +60,11 @@ export default async function Home() {
   const cardsAwaiting = feed.filter((d) => d.insight === null);
 
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Result reveal — auto-opens if there are resolved bets the user
-          hasn't seen yet. Self-no-op when `unrevealedResults` is empty. */}
-      <ResultRevealModal bets={unrevealedResults} />
+    <PullToRefresh>
+      <div className="flex min-h-screen flex-col">
+        {/* Result reveal — auto-opens if there are resolved bets the user
+            hasn't seen yet. Self-no-op when `unrevealedResults` is empty. */}
+        <ResultRevealModal bets={unrevealedResults} />
 
       {/* Header */}
       <header className="border-border/60 bg-background/60 sticky top-0 z-10 border-b backdrop-blur">
@@ -206,7 +208,8 @@ export default async function Home() {
           </Link>
         </div>
       </footer>
-    </div>
+      </div>
+    </PullToRefresh>
   );
 }
 

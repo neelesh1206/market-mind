@@ -7,6 +7,7 @@ import confetti from "canvas-confetti";
 import { ArrowDown, ArrowUp, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { markRevealed } from "@/app/actions/reveals";
+import { haptic } from "@/lib/haptics";
 import type { BetHistoryRow } from "@/lib/bets";
 
 type Props = {
@@ -44,18 +45,25 @@ export function ResultRevealModal({ bets }: Props) {
   const current = bets[index] ?? null;
   const isWin = current?.outcome === "WIN";
 
-  // Fire confetti on flip-to-win — once per card, never on reduced-motion.
+  // Fire confetti + haptic on flip-to-win. Both gated on reduced-motion;
+  // the haptic helper has its own check too as defense in depth.
   useEffect(() => {
-    if (!flipped || !isWin || reducedMotion) return;
-    confetti({
-      particleCount: 80,
-      spread: 70,
-      startVelocity: 35,
-      ticks: 200,
-      origin: { y: 0.45 },
-      colors: ["#10b981", "#34d399", "#6ee7b7", "#fafafa"],
-      scalar: 0.9,
-    });
+    if (!flipped || reducedMotion) return;
+    if (isWin) {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        startVelocity: 35,
+        ticks: 200,
+        origin: { y: 0.45 },
+        colors: ["#10b981", "#34d399", "#6ee7b7", "#fafafa"],
+        scalar: 0.9,
+      });
+      haptic("success");
+    } else {
+      // Loss/void still gets a soft beat so the reveal lands physically too.
+      haptic("tap");
+    }
   }, [flipped, isWin, reducedMotion]);
 
   if (!open || !current) return null;
