@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { rateLimit } from "@/lib/rate-limit";
 import { WATCHLIST_MAX } from "@/lib/watchlist";
 
 export type WatchlistMutationResult =
@@ -28,6 +29,14 @@ export async function addToWatchlist(stockId: string): Promise<WatchlistMutation
   } = await supabase.auth.getUser();
   if (authErr || !user) {
     return { ok: false, error: "Not authenticated" };
+  }
+
+  const rl = await rateLimit("watchlist", user.id);
+  if (!rl.ok) {
+    return {
+      ok: false,
+      error: `Too many watchlist changes — try again in ${rl.retryAfter}s`,
+    };
   }
 
   // Check current count before inserting — cheap, avoids a race where two
@@ -77,6 +86,14 @@ export async function removeFromWatchlist(stockId: string): Promise<WatchlistMut
   } = await supabase.auth.getUser();
   if (authErr || !user) {
     return { ok: false, error: "Not authenticated" };
+  }
+
+  const rl = await rateLimit("watchlist", user.id);
+  if (!rl.ok) {
+    return {
+      ok: false,
+      error: `Too many watchlist changes — try again in ${rl.retryAfter}s`,
+    };
   }
 
   const { error } = await supabase

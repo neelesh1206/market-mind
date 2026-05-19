@@ -133,6 +133,109 @@ export default async function AboutPage() {
           </ul>
         </section>
 
+        {/* Where the numbers come from */}
+        <section className="space-y-4">
+          <header className="space-y-1">
+            <h2 className="text-2xl font-semibold">Where the numbers come from</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              The signals you see on every stock card are not computed in your browser. A nightly
+              Python job does the work — here&apos;s what it does and why.
+            </p>
+          </header>
+
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
+            <p className="text-foreground/90 text-sm font-medium">The 90-second version</p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Every weeknight at 8 PM ET, a Python pipeline runs on GitHub&apos;s servers and acts
+              like a research analyst: it visits ~10 data sources for each of our 50 stocks, scores
+              everything, and writes the result to the database. In the morning, the app just reads
+              those pre-computed rows. The signals you see were computed once overnight — not when
+              you opened the page.
+            </p>
+          </div>
+
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
+            <p className="text-foreground/90 text-sm font-medium">What gets pulled per stock</p>
+            <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
+              <li>
+                <span className="text-foreground font-medium">Prices &amp; technicals</span> — one
+                year of daily OHLCV bars from Yahoo Finance, then RSI / MACD / moving averages
+                computed locally.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">News headlines</span> — up to ~20
+                articles per stock from Massive (formerly Polygon.io).
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Analyst ratings</span> —
+                buy/hold/sell consensus plus price targets from Finnhub.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Insider activity</span> — Form 4
+                transactions plus 8-K material events straight from SEC EDGAR (free, government
+                source).
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Social mentions</span> — StockTwits
+                bullish %, r/wallstreetbets attention, Reddit mention deltas.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Macro context</span> — VIX level and
+                sector ETF performance from FRED.
+              </li>
+            </ul>
+          </div>
+
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
+            <p className="text-foreground/90 text-sm font-medium">
+              Two AI models do the parts math can&apos;t
+            </p>
+            <ul className="text-muted-foreground space-y-2 text-sm leading-relaxed">
+              <li>
+                <span className="text-foreground font-medium">FinBERT</span> reads each news
+                article and decides if it&apos;s positive / neutral / negative. We use it instead
+                of keyword matching because financial language depends on context —{" "}
+                <span className="text-foreground italic">&ldquo;raised guidance&rdquo;</span> is
+                bullish, but{" "}
+                <span className="text-foreground italic">&ldquo;raised concerns&rdquo;</span> is
+                bearish.
+              </li>
+              <li>
+                <span className="text-foreground font-medium">Llama-3 / Mistral</span> turns the
+                math (the four bucket scores) into the one-sentence English explanation under the
+                verdict chip — &ldquo;Bullish — driven by strong analyst upgrades and rising
+                technical momentum.&rdquo;
+              </li>
+            </ul>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Both run on HuggingFace&apos;s inference API. If either fails or times out, the
+              pipeline degrades gracefully: sentiment falls back to whichever articles did score
+              successfully, and verdict reasoning falls back to a rule-based template. The
+              numerical signal is never blocked by an LLM hiccup.
+            </p>
+          </div>
+
+          <div className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
+            <p className="text-foreground/90 text-sm font-medium">The audit trail is public</p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Every signal carries its sources — which fetchers contributed, when the data was
+              fetched, whether they agreed or disagreed. This is the moat against the
+              &ldquo;robo-advisor&rdquo; framing: data is shown to you, not interpreted for you.
+              The code that does all of this is open source —{" "}
+              <a
+                href="https://github.com/neelesh1206/market-mind/tree/main/pipeline"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+              >
+                pipeline/
+                <ExternalLink className="h-3 w-3" aria-hidden />
+              </a>
+              .
+            </p>
+          </div>
+        </section>
+
         {/* The four signal buckets */}
         <section className="space-y-6">
           <header className="space-y-1">

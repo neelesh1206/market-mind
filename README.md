@@ -11,9 +11,35 @@
 
 ## What it does
 
-MarketMind aggregates **10+ financial data sources** (market data, news, analyst ratings, insider activity, social sentiment) into a transparent **per-stock signal breakdown**. Users predict UP/DOWN on stocks before market open using virtual credits, results resolve at close, and gamification (streaks, badges, weekly leaderboards) drives a daily return ritual.
+MarketMind is a daily stock prediction game built on top of a transparent signal engine.
 
-Built as a portfolio project demonstrating: data pipelines, NLP (FinBERT + Llama-3), real-time-ish UX, animation craft, and enterprise-grade engineering practices.
+Every weeknight at 8 PM ET, a Python pipeline runs on GitHub Actions and behaves like a research analyst: it visits **~10 data sources** for each of 50 curated stocks, scores everything it finds into four signal buckets per stock, and produces a single UP/DOWN/NEUTRAL verdict with a one-sentence explanation. The next morning users open the app, see the signals + verdict, and place a virtual-credit bet before the window locks at 1 PM ET. At 4:15 PM the resolution job scores everyone's bets — and MarketMind's own call — against the day's close.
+
+The app itself never calls the data sources. The pipeline is the *producer*, the database (Supabase) is the *contract*, the website is the *consumer*.
+
+### What goes into a single stock's daily reading
+
+| Bucket | Where the data comes from | What gets computed |
+|---|---|---|
+| **Technical** | yfinance OHLCV | RSI, MACD crossover, distance from 20/50-day moving averages, Bollinger position, volume trend |
+| **Sentiment** | Massive news API + FinBERT on HuggingFace | Per-article sentiment classification, recency-weighted into a single score, cross-source agreement counter |
+| **Professional** | Finnhub (analysts) + SEC EDGAR (insiders, 8-Ks) | Buy/hold/sell consensus, recent rating changes, insider transaction direction, earnings proximity |
+| **Social** | StockTwits + ApeWisdom + Reddit | Bullish ratio, mention deltas, retail attention rank |
+
+Each bucket is normalized to `[−1, +1]`. The verdict is a weighted average; the exact formula and weights live in [`pipeline/processors/verdict.py`](pipeline/processors/verdict.py). Macro context (VIX, sector ETFs from FRED) is fetched once per run and stored alongside.
+
+### Two AI models do the parts math can't
+
+- **[FinBERT](https://huggingface.co/ProsusAI/finbert)** reads each news article and labels it positive / neutral / negative. We use it instead of keyword matching because financial language depends on context — *"raised guidance"* is bullish, but *"raised concerns"* is bearish.
+- **Llama-3 / Mistral** turns the verdict + bucket scores into the one-sentence English explanation under the verdict chip — *"Bullish — driven by strong analyst upgrades and a constructive technical setup."*
+
+Both run on HuggingFace's Inference API. If either fails, the pipeline degrades gracefully: sentiment falls back to whichever articles did score, and the verdict reasoning falls back to a rule-based template. The numerical signal is never blocked by an LLM hiccup.
+
+### Track record is public
+
+MarketMind's own daily calls live in `marketmind_predictions` and are resolved at market close every day. Cumulative accuracy is shown on `/about` with sample size — small N is noisy, so the denominator is always visible alongside the percentage.
+
+Built as a portfolio project demonstrating: data pipelines, financial NLP, real-time-ish UX, animation craft, and enterprise-grade engineering practices.
 
 ## Tech stack
 

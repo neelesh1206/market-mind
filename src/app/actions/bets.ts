@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getMarketSchedule } from "@/lib/market-schedule";
+import { rateLimit } from "@/lib/rate-limit";
 import type { Prediction } from "@/lib/bets";
 
 export type PlaceBetInput = {
@@ -60,6 +61,16 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
   } = await supabase.auth.getUser();
   if (authErr || !user) {
     return { ok: false, error: "Not authenticated" };
+  }
+
+  // Per-user rate limit on placement. Generous threshold; honest users
+  // never hit it, abuse / runaway useEffects do.
+  const rl = await rateLimit("placeBet", user.id);
+  if (!rl.ok) {
+    return {
+      ok: false,
+      error: `Too many bets placed too quickly — try again in ${rl.retryAfter}s`,
+    };
   }
 
   const { data, error } = await supabase.rpc("place_bet", {
@@ -125,6 +136,14 @@ export async function cancelBet(input: { predictionId: string }): Promise<Cancel
   } = await supabase.auth.getUser();
   if (authErr || !user) {
     return { ok: false, error: "Not authenticated" };
+  }
+
+  const rl = await rateLimit("cancelBet", user.id);
+  if (!rl.ok) {
+    return {
+      ok: false,
+      error: `Too many cancel attempts — try again in ${rl.retryAfter}s`,
+    };
   }
 
   const { error } = await supabase.rpc("cancel_bet", {

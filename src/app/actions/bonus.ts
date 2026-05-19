@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { etCalendarDate } from "@/lib/market-schedule";
+import { rateLimit } from "@/lib/rate-limit";
 
 export type ClaimDailyBonusResult =
   | {
@@ -30,6 +31,14 @@ export async function claimDailyBonus(): Promise<ClaimDailyBonusResult> {
   } = await supabase.auth.getUser();
   if (authErr || !user) {
     return { ok: false, error: "Not authenticated" };
+  }
+
+  const rl = await rateLimit("claimDailyBonus", user.id);
+  if (!rl.ok) {
+    return {
+      ok: false,
+      error: `Slow down — try claiming again in ${rl.retryAfter}s`,
+    };
   }
 
   const today = etCalendarDate();
