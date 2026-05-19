@@ -5,6 +5,7 @@ import type {
   StockCardData,
   StockInsight,
 } from "@/types/insight";
+import { computeSyntheticVerdict } from "@/lib/verdict";
 
 /**
  * For a user's watchlist, fetch the most-recent stock_insight per stock plus
@@ -60,10 +61,7 @@ export async function fetchHomeFeed(
         .eq("display_rank", 1),
       // Defensive: the marketmind_predictions table is a recent migration;
       // a missing-table error here shouldn't 500 the whole feed.
-      client
-        .from("marketmind_predictions")
-        .select("*")
-        .in("insight_id", insightIds),
+      client.from("marketmind_predictions").select("*").in("insight_id", insightIds),
     ]);
     if (articlesRes.error) {
       throw new Error(`fetchHomeFeed articles: ${articlesRes.error.message}`);
@@ -85,7 +83,10 @@ export async function fetchHomeFeed(
   return watchlistStocks.map((stock) => {
     const insight = latestByStock.get(stock.id) ?? null;
     const topArticle = insight ? (articleByInsight.get(insight.id) ?? null) : null;
-    const verdict = verdictByStock.get(stock.id) ?? null;
+    // Stored verdict wins when it exists (carries reasoning + resolution outcome).
+    // Otherwise synthesize one from the bucket scores so the UI always has a prediction to show.
+    const verdict =
+      verdictByStock.get(stock.id) ?? (insight ? computeSyntheticVerdict(insight) : null);
     return { stock, insight, topArticle, verdict };
   });
 }
@@ -110,9 +111,7 @@ export async function fetchTrackRecord(
   if (error) {
     // Defensive: pre-migration the table may not exist yet. Report empty
     // track record rather than blowing up the page that called us.
-    console.warn(
-      `[feed] fetchTrackRecord failed (likely migration not applied): ${error.message}`,
-    );
+    console.warn(`[feed] fetchTrackRecord failed (likely migration not applied): ${error.message}`);
     return { total: 0, correct: 0, accuracy: null };
   }
   const rows = data ?? [];

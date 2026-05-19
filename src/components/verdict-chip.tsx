@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowRight, ArrowUp, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSyntheticVerdict } from "@/lib/verdict";
 import type { MarketMindPrediction } from "@/types/insight";
 
 type Props = {
@@ -24,30 +25,42 @@ export function VerdictChip({ verdict, showReasoning = false }: Props) {
     verdict.direction === "UP" ? ArrowUp : verdict.direction === "DOWN" ? ArrowDown : ArrowRight;
 
   const confidencePct = Math.round(verdict.confidence * 100);
+  const isSynthetic = isSyntheticVerdict(verdict);
 
   return (
     <div className="space-y-1.5">
-      <div
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium",
-          chipTone(tone, verdict.resolved, verdict.outcome),
-        )}
-      >
-        <Target className="h-3 w-3" aria-hidden />
-        <span className="tracking-wider uppercase opacity-70">MarketMind&apos;s read:</span>
-        <Icon className="h-3.5 w-3.5" aria-hidden />
-        <span className="font-semibold">{verdict.direction}</span>
-        {verdict.direction !== "NEUTRAL" && (
-          <span className="font-mono opacity-80">· {confidencePct}%</span>
-        )}
-        {verdict.resolved && verdict.outcome && (
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium",
+            chipTone(tone, verdict.resolved, verdict.outcome),
+          )}
+        >
+          <Target className="h-3 w-3" aria-hidden />
+          <span className="tracking-wider uppercase opacity-70">MarketMind&apos;s read:</span>
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+          <span className="font-semibold">{verdict.direction}</span>
+          {verdict.direction !== "NEUTRAL" && (
+            <span className="font-mono opacity-80">· {confidencePct}%</span>
+          )}
+          {verdict.resolved && verdict.outcome && (
+            <span
+              className={cn(
+                "ml-1 rounded-sm px-1 text-[10px] font-bold uppercase",
+                outcomeTone(verdict.outcome),
+              )}
+            >
+              {verdict.outcome}
+            </span>
+          )}
+        </div>
+        {isSynthetic && (
           <span
-            className={cn(
-              "ml-1 rounded-sm px-1 text-[10px] font-bold uppercase",
-              outcomeTone(verdict.outcome),
-            )}
+            className="text-muted-foreground inline-flex items-center gap-1 text-[10px] tracking-wider uppercase"
+            title="Computed from today's signals but not yet tracked toward accuracy. Run the pipeline + apply migration to start tracking."
           >
-            {verdict.outcome}
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500/70" aria-hidden />
+            Live · not tracked
           </span>
         )}
       </div>

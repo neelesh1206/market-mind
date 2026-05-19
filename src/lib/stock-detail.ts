@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InsightArticle, MarketMindPrediction, StockInsight } from "@/types/insight";
+import { computeSyntheticVerdict } from "@/lib/verdict";
 
 export type StockDetail = {
   stock: {
@@ -77,10 +78,16 @@ export async function fetchStockDetail(
     articles = (articlesRes.data ?? []) as InsightArticle[];
   }
 
+  // Fall back to a client-computed verdict when no stored row exists
+  // (e.g. before the marketmind_predictions migration is applied, or before
+  // today's pipeline has run). Stored verdicts always win — they carry
+  // resolution outcomes.
+  const displayVerdict = verdict ?? (insight ? computeSyntheticVerdict(insight) : null);
+
   return {
     stock: stockRow,
     insight,
     articles,
-    verdict,
+    verdict: displayVerdict,
   };
 }
