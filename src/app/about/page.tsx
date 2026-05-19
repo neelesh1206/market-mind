@@ -372,6 +372,24 @@ confidence = min(|combined|, 1.0)`}
             covers the math.
           </p>
           <p className="text-muted-foreground text-sm leading-relaxed">
+            The 0.15 threshold is also <span className="text-foreground">scaled per-stock by
+            realized volatility</span>: a low-vol name like PG (daily σ ≈ 0.9%) needs only{" "}
+            <span className="text-foreground font-mono">|combined| &gt; 0.075</span> to flip
+            directional, while a high-vol name like NVDA (σ ≈ 3.5%) needs{" "}
+            <span className="text-foreground font-mono">|combined| &gt; 0.26</span>. Same signal
+            magnitude is less informative on noisy stocks, so we require more of it before making a
+            call.{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0014-vol-normalize-direction-threshold.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0014 <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            documents the design.
+          </p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
             <a
               href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0007-verdict-with-track-record.md"
               target="_blank"
