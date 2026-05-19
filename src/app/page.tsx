@@ -4,12 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
 import { fetchBetsForTradingDay } from "@/lib/bets";
-import { getMarketSchedule } from "@/lib/market-schedule";
+import { getDailyBonusStatus } from "@/lib/bonus";
+import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StockCard } from "@/components/stock-card";
 import { TrackRecordBadge } from "@/components/track-record-badge";
+import { DailyBonusCard } from "@/components/daily-bonus-card";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -31,10 +33,12 @@ export default async function Home() {
   // Fetch latest insights + top articles for the watchlist + track record +
   // any bets the user already placed for the current trading day.
   const schedule = getMarketSchedule();
-  const [feedUnsorted, trackRecord, betsByStockId] = await Promise.all([
+  const todayEt = etCalendarDate();
+  const [feedUnsorted, trackRecord, betsByStockId, bonusStatus] = await Promise.all([
     fetchHomeFeed(supabase, watchlist),
     fetchTrackRecord(supabase, 30),
     fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
+    getDailyBonusStatus(supabase, userId, todayEt),
   ]);
   const feed = rankFeed(feedUnsorted);
 
@@ -113,6 +117,11 @@ export default async function Home() {
             />
           </div>
         </section>
+
+        {/* Daily login bonus — the ritual hook. Always rendered; the
+            component itself decides whether to show the claim-CTA or the
+            muted "already claimed today" state based on `bonusStatus`. */}
+        <DailyBonusCard status={bonusStatus} />
 
         {/* Market schedule + bet window status */}
         <MarketScheduleBar />

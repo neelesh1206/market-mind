@@ -393,6 +393,16 @@ export function formatResolutionCopy(resolutionAt: Date, now: Date = new Date())
   return `Resolves ${day} at ${time} ET`;
 }
 
+/**
+ * Today's calendar date in ET as ISO `YYYY-MM-DD`. Used for per-day
+ * mechanics (daily bonus) where the unit is "calendar day in the market's
+ * timezone", not the user's local wall clock.
+ */
+export function etCalendarDate(now: Date = new Date()): string {
+  const p = inET(now);
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+}
+
 /** Format a Date as a short ET wall-clock label ("Mon 8:00 PM ET"). */
 export function formatET(date: Date): string {
   return (

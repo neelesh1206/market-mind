@@ -54,6 +54,24 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: daily login bonus RPC
+
+`claim_daily_bonus` Postgres function ships in
+`supabase/migrations/20260519000005_claim_daily_bonus_rpc.sql`. Until
+applied, the Claim button on the home-page banner surfaces "Daily
+bonus isn't enabled on the server yet (migration pending)".
+
+Apply via the standard workflow. Smoke-test:
+
+1. Load `/` — banner shows "Your daily bonus is waiting · Claim +100".
+2. Click **Claim +100**. Toast: "Welcome back · +100 credits".
+3. Banner flips to muted state: "1-day streak · Come back tomorrow".
+4. Click again (now disabled, but if you bypass): RPC returns
+   `already_claimed_today`.
+5. Verify `user_profiles.current_streak = 1`, `last_login_date = today`,
+   `credit_balance` increased by 100, and `credit_transactions` has a
+   `type='DAILY_BONUS'`, `amount=+100` row.
+
 ### Pending migration: bet cancellation RPC
 
 `cancel_bet` Postgres function (see [ADR 0009 — Cancellation](adr/0009-bet-placement-atomicity.md#cancellation-added-2026-05-19))
