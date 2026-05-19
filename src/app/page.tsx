@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchUserWatchlist } from "@/lib/watchlist";
 import { SignOutButton } from "./sign-out-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -10,12 +12,19 @@ export default async function Home() {
     redirect("/login");
   }
 
-  const email = (data.claims.email ?? data.claims.sub) as string;
+  const userId = data.claims.sub as string;
+  const email = (data.claims.email ?? userId) as string;
+
+  // New users with no watchlist → send to onboarding
+  const watchlist = await fetchUserWatchlist(supabase, userId);
+  if (watchlist.length === 0) {
+    redirect("/onboarding");
+  }
 
   const { data: profile } = await supabase
     .from("user_profiles")
     .select("display_name, credit_balance, current_streak")
-    .eq("id", data.claims.sub)
+    .eq("id", userId)
     .maybeSingle();
 
   const credits = profile?.credit_balance ?? 0;
@@ -68,6 +77,7 @@ export default async function Home() {
             >
               {initial}
             </div>
+            <ThemeToggle />
             <SignOutButton />
           </div>
         </div>

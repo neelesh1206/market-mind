@@ -8,6 +8,11 @@ For deeper context on any decision, see corresponding ADR in [docs/adr/](docs/ad
 
 ---
 
+## 2026-05-19 — Day 3 (in progress)
+
+- **onboarding-stock-picker** — New `/onboarding` route: sectored stock-grid picker. Sectors as tabs (All / Technology / Financial / Healthcare / etc.). Min 3, max 15 selections. Sticky footer bar shows live count + Continue CTA. Server action commits to `user_watchlist` then redirects home. `src/lib/watchlist.ts` centralizes reads + writes. Home page auto-redirects new users (empty watchlist) here.
+- **theme-toggle** — Installed `next-themes`. `ThemeProvider` wraps the app with `attribute="class"` + system default. `ThemeToggle` cycles light → dark → system, mounted in the home-page header. `suppressHydrationWarning` on `<html>` prevents the FOUC. Theme color in viewport meta updated to match each scheme.
+
 ## 2026-05-18 — Day 2
 
 - **summarizer-fixed** — Llama-3-8B-Instruct was failing with opaque `status=?` HTTPErrors — the model is gated on HF and the free serverless tier doesn't reliably serve it anymore. Switched to: (1) `chat_completion` API (newer, OpenAI-compatible, routes cleanly), (2) `mistralai/Mistral-7B-Instruct-v0.3` as default (well-supported on free `hf-inference` provider), (3) explicit `provider="hf-inference"` to bypass "auto" routing that lands on paid providers with opaque errors, (4) much richer error logging (exception type + body extract) so future failures debug in one log line. Model is configurable via `HUGGINGFACE_SUMMARY_MODEL` env var.
