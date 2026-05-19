@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { History, LogOut, Settings, Trophy, User } from "lucide-react";
+import { History, LayoutGrid, LogOut, Settings, Trophy, User } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,6 +93,17 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
         >
           <Trophy className="h-4 w-4" />
           <span>Leaderboard</span>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => {
+            setOpen(false);
+            router.push("/stocks");
+          }}
+          className="cursor-pointer"
+        >
+          <LayoutGrid className="h-4 w-4" />
+          <span>Browse stocks</span>
         </DropdownMenuItem>
 
         <DropdownMenuItem
