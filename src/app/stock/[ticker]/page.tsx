@@ -22,7 +22,34 @@ type Params = Promise<{ ticker: string }>;
 
 export async function generateMetadata({ params }: { params: Params }) {
   const { ticker } = await params;
-  return { title: `${ticker.toUpperCase()} signals` };
+  const upper = ticker.toUpperCase();
+  // Site URL: prefer the deployment's public origin; falls back to localhost
+  // in dev. Social crawlers need an absolute URL for og:image.
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+  const ogImage = `${siteUrl}/og/stock/${upper}`;
+  const title = `${upper} signals`;
+  const description = `MarketMind's read on ${upper}: technical, sentiment, professional, and social signals — with a published track record.`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title: `${upper} · MarketMind`,
+      description,
+      url: `${siteUrl}/stock/${upper}`,
+      siteName: "MarketMind",
+      images: [{ url: ogImage, width: 1200, height: 630, alt: `${upper} signal breakdown` }],
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${upper} · MarketMind`,
+      description,
+      images: [ogImage],
+    },
+  };
 }
 
 export default async function StockDetailPage({ params }: { params: Params }) {
