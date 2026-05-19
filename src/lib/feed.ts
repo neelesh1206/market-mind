@@ -126,6 +126,67 @@ export async function fetchTrackRecord(
  * directional signals float to the top. Cards with no insight sink to the
  * bottom (still rendered so the user knows we're working on them).
  */
+/**
+ * For the logged-out /login preview. Picks the top N highest-confidence
+ * verdicts for the current trading day, joined with stock + latest insight
+ * + top article — a teaser of what the user sees after signing up.
+ *
+ * Anon-readable: stocks/stock_insights/insight_articles/marketmind_predictions
+ * all have public_read RLS policies.
+ *
+ * Returns [] on any error (or no verdicts today) — login page should never
+ * hard-fail because a downstream table is empty.
+ */
+export async function fetchTopVerdictsForPreview(
+  client: SupabaseClient,
+  n = 2,
+): Promise<StockCardData[]> {
+  // Pull top-N verdicts by confidence. The most-recent batch is what we want
+  // — order by prediction_date desc, then confidence desc, limit N.
+  const { data: verdictRows, error: vErr } = await client
+    .from("marketmind_predictions")
+    .select("*, stocks(id, ticker, name, sector, sub_sector)")
+    .order("prediction_date", { ascending: false })
+    .order("confidence", { ascending: false })
+    .limit(n);
+
+  if (vErr || !verdictRows || verdictRows.length === 0) {
+    if (vErr) {
+      console.warn(`[preview] verdicts query failed: ${vErr.message}`);
+    }
+    return [];
+  }
+
+  type Row = MarketMindPrediction & {
+    stocks: { id: string; ticker: string; name: string; sector: string; sub_sector: string | null } | null;
+  };
+  const rows = verdictRows as unknown as Row[];
+
+  const insightIds = rows.map((r) => r.insight_id);
+  const [insightRes, articleRes] = await Promise.all([
+    client.from("stock_insights").select("*").in("id", insightIds),
+    client.from("insight_articles").select("*").in("insight_id", insightIds).eq("display_rank", 1),
+  ]);
+
+  const insightById = new Map<string, StockInsight>();
+  for (const row of (insightRes.data ?? []) as StockInsight[]) {
+    insightById.set(row.id, row);
+  }
+  const articleByInsight = new Map<string, InsightArticle>();
+  for (const row of (articleRes.data ?? []) as InsightArticle[]) {
+    articleByInsight.set(row.insight_id, row);
+  }
+
+  return rows
+    .filter((r) => r.stocks !== null)
+    .map((r) => {
+      const stock = r.stocks!;
+      const insight = insightById.get(r.insight_id) ?? null;
+      const topArticle = articleByInsight.get(r.insight_id) ?? null;
+      return { stock, insight, topArticle, verdict: r } as StockCardData;
+    });
+}
+
 export function rankFeed(feed: StockCardData[]): StockCardData[] {
   return [...feed].sort((a, b) => {
     const strength = (d: StockCardData) => {

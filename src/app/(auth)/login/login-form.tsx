@@ -32,7 +32,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-sm">
+    <div id="signin" className="w-full max-w-sm scroll-mt-12">
       <div className="border-border/60 bg-card/40 space-y-8 rounded-2xl border p-8 shadow-2xl backdrop-blur">
         <header className="space-y-3 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 shadow-lg shadow-emerald-900/40">

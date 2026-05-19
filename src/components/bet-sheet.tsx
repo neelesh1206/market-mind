@@ -389,21 +389,27 @@ function ManageBody({
           />
         </div>
 
-        {/* Cancel deadline */}
+        {/* Cancel deadline — prominent, not buried in 11px gray */}
         {betWindowClosesAt && (
-          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-            <Clock className="h-3 w-3" aria-hidden />
-            <span>
-              You can cancel until {formatET(betWindowClosesAt)} (
-              {formatRelative(betWindowClosesAt)}). After that, you&apos;re in.
-            </span>
+          <div className="border-border/60 bg-card/40 rounded-lg border p-4">
+            <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-[11px] font-medium tracking-wider uppercase">
+              <Clock className="h-3 w-3" aria-hidden />
+              <span>Cancel deadline</span>
+            </div>
+            <p className="text-foreground text-base font-semibold">
+              {formatRelative(betWindowClosesAt)}
+            </p>
+            <p className="text-muted-foreground text-xs">
+              {formatET(betWindowClosesAt)} · after that, you&apos;re locked in until the
+              4:15 PM ET resolution.
+            </p>
           </div>
         )}
 
         {error && <p className="text-destructive text-xs">{error}</p>}
       </div>
 
-      <SheetFooter className="border-border/60 flex flex-col gap-2 border-t px-6 py-4 sm:flex-row">
+      <SheetFooter className="border-border/60 flex flex-row gap-2 border-t px-6 py-4">
         <Button
           type="button"
           variant="outline"

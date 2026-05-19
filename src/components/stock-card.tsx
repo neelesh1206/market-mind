@@ -20,6 +20,12 @@ type Props = {
   userCredits?: number;
   /** Market schedule snapshot driving the CTA's three states (chip / button / closed-label). */
   schedule?: MarketSchedule;
+  /**
+   * Preview mode for the logged-out /login page. When true:
+   *   - bet CTA becomes a "Sign in to bet →" link to /login
+   *   - "Details →" link points to /login (so any drill-down funnels signup)
+   */
+  preview?: boolean;
 };
 
 /**
@@ -31,8 +37,9 @@ type Props = {
  * The full per-signal breakdown lives on /stock/[ticker]. This card is
  * intentionally dense-but-scannable — every row earns its place.
  */
-export function StockCard({ data, userBet, userCredits, schedule }: Props) {
+export function StockCard({ data, userBet, userCredits, schedule, preview }: Props) {
   const { stock, insight, topArticle, verdict } = data;
+  const detailHref = `/stock/${stock.ticker}`;
 
   return (
     <article
@@ -187,25 +194,46 @@ export function StockCard({ data, userBet, userCredits, schedule }: Props) {
             </span>
           )}
           {insight?.computed_at && <span>· updated {timeAgo(insight.computed_at)}</span>}
-          <Link
-            href={`/stock/${stock.ticker}`}
-            className="text-foreground/80 hover:text-foreground ml-1 underline-offset-2 hover:underline"
-          >
-            Details →
-          </Link>
+          {preview ? (
+            // Same-page hash jump — native <a> so the browser handles the
+            // anchor scroll reliably across mobile webkits, which sometimes
+            // ignore Next.js Link for in-page hashes.
+            <a
+              href="#signin"
+              className="text-foreground/80 hover:text-foreground ml-1 underline-offset-2 hover:underline"
+            >
+              Sign in for details →
+            </a>
+          ) : (
+            <Link
+              href={detailHref}
+              className="text-foreground/80 hover:text-foreground ml-1 underline-offset-2 hover:underline"
+            >
+              Details →
+            </Link>
+          )}
         </div>
-        {schedule && (
-          <BetCta
-            stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
-            verdict={verdict}
-            userBet={userBet ?? null}
-            userCredits={userCredits ?? 0}
-            betWindowOpen={schedule.betWindowOpen}
-            betWindowClosesAt={schedule.betWindowClosesAt}
-            betWindowOpensAt={schedule.betWindowOpensAt}
-            resolutionAt={schedule.resolutionAt}
-            size="sm"
-          />
+        {preview ? (
+          <a
+            href="#signin"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-600/90"
+          >
+            Sign in to bet →
+          </a>
+        ) : (
+          schedule && (
+            <BetCta
+              stock={{ id: stock.id, ticker: stock.ticker, name: stock.name }}
+              verdict={verdict}
+              userBet={userBet ?? null}
+              userCredits={userCredits ?? 0}
+              betWindowOpen={schedule.betWindowOpen}
+              betWindowClosesAt={schedule.betWindowClosesAt}
+              betWindowOpensAt={schedule.betWindowOpensAt}
+              resolutionAt={schedule.resolutionAt}
+              size="sm"
+            />
+          )
         )}
       </footer>
     </article>
