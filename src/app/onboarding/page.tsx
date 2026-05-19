@@ -78,7 +78,7 @@ export default async function OnboardingPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
+      <main id="main" className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
         <section className="space-y-3">
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
             {isFirstTime ? "Pick the stocks you want to follow" : "Manage your stocks"}

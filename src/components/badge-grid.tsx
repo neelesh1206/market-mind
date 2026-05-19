@@ -66,7 +66,7 @@ function BadgeTile({ meta, earned }: { meta: BadgeMeta; earned?: EarnedBadge }) 
         </p>
       </div>
       {!isEarned && (
-        <Lock className="text-muted-foreground/60 absolute top-2 right-2 h-3 w-3" aria-hidden />
+        <Lock className="text-muted-foreground absolute top-2 right-2 h-3 w-3" aria-hidden />
       )}
     </div>
   );

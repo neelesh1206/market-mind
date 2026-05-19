@@ -70,7 +70,7 @@ export default async function AboutPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-12 px-6 py-12">
+      <main id="main" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-12 px-6 py-12">
         {/* Hero */}
         <section className="space-y-4">
           <p className="text-xs font-medium tracking-wider text-emerald-500 uppercase">

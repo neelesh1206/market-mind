@@ -111,7 +111,7 @@ export default async function Home() {
       </header>
 
       {/* Main */}
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-6 py-10">
+      <main id="main" className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-6 py-10">
         <section className="space-y-2">
           <p className="text-muted-foreground text-sm">
             Welcome back, <span className="text-foreground font-medium">{name}</span>

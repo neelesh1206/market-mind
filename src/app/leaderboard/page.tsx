@@ -60,7 +60,7 @@ export default async function LeaderboardPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
+      <main id="main" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
         <section className="space-y-2">
           <p className="text-xs font-medium tracking-wider text-emerald-500 uppercase">
             <Trophy className="mr-1 inline h-3.5 w-3.5" aria-hidden /> Weekly leaderboard

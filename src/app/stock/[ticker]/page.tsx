@@ -116,7 +116,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-6 py-8">
+      <main id="main" className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-6 py-8">
         {/* Stock hero */}
         <section className="space-y-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
