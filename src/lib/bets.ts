@@ -53,6 +53,46 @@ export type BetHistoryRow = Prediction & {
   stock: { ticker: string; name: string; sector: string | null };
 };
 
+/**
+ * Resolved bets the user hasn't seen the reveal animation for yet. Driven by
+ * the partial index on (user_id) WHERE resolved AND revealed_at IS NULL, so
+ * the query stays cheap as history grows.
+ *
+ * Capped at `limit` (default 10) so a user returning after a long absence
+ * doesn't get a 50-card reveal modal — they see the most recent resolutions.
+ */
+export async function fetchUnrevealedResolved(
+  client: SupabaseClient,
+  userId: string,
+  limit = 10,
+): Promise<BetHistoryRow[]> {
+  const { data, error } = await client
+    .from("predictions")
+    .select(
+      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, payout, resolved_at, created_at, stocks(ticker, name, sector)",
+    )
+    .eq("user_id", userId)
+    .eq("resolved", true)
+    .is("revealed_at", null)
+    .order("prediction_date", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    // Schema-missing case (column not deployed yet) → degrade silently rather
+    // than break the home page render.
+    console.warn(`[reveals] fetchUnrevealedResolved: ${error.message}`);
+    return [];
+  }
+
+  type Row = Prediction & {
+    stocks: { ticker: string; name: string; sector: string | null } | null;
+  };
+
+  return ((data ?? []) as unknown as Row[])
+    .filter((r) => r.stocks !== null)
+    .map((r) => ({ ...r, stock: r.stocks! }) as BetHistoryRow);
+}
+
 export type BetHistoryFilter = "all" | "pending" | "resolved";
 
 /**

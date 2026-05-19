@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
-import { fetchBetsForTradingDay } from "@/lib/bets";
+import { fetchBetsForTradingDay, fetchUnrevealedResolved } from "@/lib/bets";
 import { getDailyBonusStatus } from "@/lib/bonus";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
@@ -12,6 +12,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { StockCard } from "@/components/stock-card";
 import { TrackRecordBadge } from "@/components/track-record-badge";
 import { DailyBonusCard } from "@/components/daily-bonus-card";
+import { ResultRevealModal } from "@/components/result-reveal-modal";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -34,12 +35,14 @@ export default async function Home() {
   // any bets the user already placed for the current trading day.
   const schedule = getMarketSchedule();
   const todayEt = etCalendarDate();
-  const [feedUnsorted, trackRecord, betsByStockId, bonusStatus] = await Promise.all([
-    fetchHomeFeed(supabase, watchlist),
-    fetchTrackRecord(supabase, 30),
-    fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
-    getDailyBonusStatus(supabase, userId, todayEt),
-  ]);
+  const [feedUnsorted, trackRecord, betsByStockId, bonusStatus, unrevealedResults] =
+    await Promise.all([
+      fetchHomeFeed(supabase, watchlist),
+      fetchTrackRecord(supabase, 30),
+      fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
+      getDailyBonusStatus(supabase, userId, todayEt),
+      fetchUnrevealedResolved(supabase, userId, 10),
+    ]);
   const feed = rankFeed(feedUnsorted);
 
   const { data: profile } = await supabase
@@ -57,6 +60,10 @@ export default async function Home() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* Result reveal — auto-opens if there are resolved bets the user
+          hasn't seen yet. Self-no-op when `unrevealedResults` is empty. */}
+      <ResultRevealModal bets={unrevealedResults} />
+
       {/* Header */}
       <header className="border-border/60 bg-background/60 sticky top-0 z-10 border-b backdrop-blur">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-3">

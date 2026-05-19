@@ -54,6 +54,25 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: result reveals (revealed_at column + RPC)
+
+Migration `supabase/migrations/20260519000006_revealed_at.sql` adds
+`revealed_at timestamptz` to `predictions` + the partial index +
+`mark_predictions_revealed(uuid[])` RPC. See
+[ADR 0010](adr/0010-postgres-over-redis-for-seen-state.md) for the
+design rationale (Postgres over Redis for durable per-user state).
+
+Apply via the standard workflow. Smoke-test (requires at least one
+resolved bet):
+
+1. Manually run resolution for yesterday — `python pipeline/resolve_predictions.py --date YYYY-MM-DD` or via the Actions workflow.
+2. Reload `/` — the reveal modal auto-opens with the resolved bet.
+3. Tap card front → flips to outcome. WIN should fire confetti.
+4. Tap close (X) or "Tap to close" on the last card.
+5. Reload `/` — modal should NOT reopen.
+6. Verify in SQL: `predictions.revealed_at IS NOT NULL` for all resolved
+   bets that were in the modal.
+
 ### Pending migration: daily login bonus RPC
 
 `claim_daily_bonus` Postgres function ships in
