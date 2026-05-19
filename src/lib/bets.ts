@@ -19,6 +19,29 @@ export function isStuckPrediction(
   return !bet.resolved && bet.prediction_date < todayEt;
 }
 
+// Columns that all three read paths share. Kept in sync with the Prediction
+// type. `price_at_placement` is the most-recently-added — when its migration
+// hasn't been applied yet, the SELECT explodes; helpers below catch that
+// specific failure and retry without the new column.
+const PREDICTION_COLUMNS =
+  "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at";
+
+const PREDICTION_COLUMNS_LEGACY =
+  "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, payout, resolved_at, created_at";
+
+/**
+ * Postgres "column does not exist" surfaces from PostgREST as code 42703.
+ * If a deploy lands ahead of its migration, we'd rather render the page with
+ * stale data than crash on a missing column. Caller decides which legacy
+ * column to omit.
+ */
+function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
+  return (
+    !!err &&
+    (err.code === "42703" || /column .* does not exist/i.test(err.message ?? ""))
+  );
+}
+
 export type Prediction = {
   id: string;
   user_id: string;
@@ -55,21 +78,41 @@ export async function fetchBetsForTradingDay(
   userId: string,
   tradingDayLabel: string,
 ): Promise<Record<string, Prediction>> {
-  const { data, error } = await client
-    .from("predictions")
-    .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at",
-    )
-    .eq("user_id", userId)
-    .eq("prediction_date", tradingDayLabel);
+  // Two-step fallback typed loosely — supabase-js infers the row type from
+  // the literal select string, so the legacy branch has a different (subset)
+  // shape. We collapse into Partial<Prediction>[] and fill in code.
+  type Resp = {
+    data: Partial<Prediction>[] | null;
+    error: { code?: string; message?: string } | null;
+  };
 
-  if (error) {
-    throw new Error(`fetchBetsForTradingDay: ${error.message}`);
+  let res: Resp = (await client
+    .from("predictions")
+    .select(PREDICTION_COLUMNS)
+    .eq("user_id", userId)
+    .eq("prediction_date", tradingDayLabel)) as Resp;
+
+  if (res.error && isMissingColumnError(res.error)) {
+    console.warn(
+      "[bets] price_at_placement column missing; falling back to legacy SELECT",
+    );
+    res = (await client
+      .from("predictions")
+      .select(PREDICTION_COLUMNS_LEGACY)
+      .eq("user_id", userId)
+      .eq("prediction_date", tradingDayLabel)) as Resp;
+  }
+
+  if (res.error) {
+    throw new Error(`fetchBetsForTradingDay: ${res.error.message}`);
   }
 
   const out: Record<string, Prediction> = {};
-  for (const row of (data ?? []) as Prediction[]) {
-    out[row.stock_id] = row;
+  for (const row of res.data ?? []) {
+    out[row.stock_id!] = {
+      ...row,
+      price_at_placement: row.price_at_placement ?? null,
+    } as Prediction;
   }
   return out;
 }
@@ -91,31 +134,51 @@ export async function fetchUnrevealedResolved(
   userId: string,
   limit = 10,
 ): Promise<BetHistoryRow[]> {
-  const { data, error } = await client
+  const selectWith = `${PREDICTION_COLUMNS}, stocks(ticker, name, sector)`;
+  const selectLegacy = `${PREDICTION_COLUMNS_LEGACY}, stocks(ticker, name, sector)`;
+
+  type Resp = {
+    data: (Partial<Prediction> & { stocks: { ticker: string; name: string; sector: string | null } | null })[] | null;
+    error: { code?: string; message?: string } | null;
+  };
+
+  let res: Resp = (await client
     .from("predictions")
-    .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at, stocks(ticker, name, sector)",
-    )
+    .select(selectWith)
     .eq("user_id", userId)
     .eq("resolved", true)
     .is("revealed_at", null)
     .order("prediction_date", { ascending: false })
-    .limit(limit);
+    .limit(limit)) as Resp;
 
-  if (error) {
-    // Schema-missing case (column not deployed yet) → degrade silently rather
-    // than break the home page render.
-    console.warn(`[reveals] fetchUnrevealedResolved: ${error.message}`);
+  if (res.error && isMissingColumnError(res.error)) {
+    console.warn(
+      "[reveals] price_at_placement column missing; falling back to legacy SELECT",
+    );
+    res = (await client
+      .from("predictions")
+      .select(selectLegacy)
+      .eq("user_id", userId)
+      .eq("resolved", true)
+      .is("revealed_at", null)
+      .order("prediction_date", { ascending: false })
+      .limit(limit)) as Resp;
+  }
+
+  if (res.error) {
+    // Schema-missing case (revealed_at column itself not deployed) →
+    // degrade silently rather than break the home page render.
+    console.warn(`[reveals] fetchUnrevealedResolved: ${res.error.message}`);
     return [];
   }
 
-  type Row = Prediction & {
-    stocks: { ticker: string; name: string; sector: string | null } | null;
-  };
-
-  return ((data ?? []) as unknown as Row[])
+  return (res.data ?? [])
     .filter((r) => r.stocks !== null)
-    .map((r) => ({ ...r, stock: r.stocks! }) as BetHistoryRow);
+    .map((r) => ({
+      ...r,
+      price_at_placement: r.price_at_placement ?? null,
+      stock: r.stocks!,
+    }) as BetHistoryRow);
 }
 
 export type BetHistoryFilter = "all" | "pending" | "resolved";
@@ -134,34 +197,45 @@ export async function fetchUserBetHistory(
 ): Promise<BetHistoryRow[]> {
   const { limit = 100, filter = "all" } = opts;
 
-  let query = client
-    .from("predictions")
-    .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at, stocks(ticker, name, sector)",
-    )
-    .eq("user_id", userId)
-    .order("prediction_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const baseSelect = `${PREDICTION_COLUMNS}, stocks(ticker, name, sector)`;
+  const legacySelect = `${PREDICTION_COLUMNS_LEGACY}, stocks(ticker, name, sector)`;
 
-  if (filter === "pending") query = query.eq("resolved", false);
-  else if (filter === "resolved") query = query.eq("resolved", true);
-
-  const { data, error } = await query;
-  if (error) {
-    throw new Error(`fetchUserBetHistory: ${error.message}`);
-  }
-
-  type Row = Prediction & {
-    stocks: { ticker: string; name: string; sector: string | null } | null;
+  type Resp = {
+    data: (Partial<Prediction> & { stocks: { ticker: string; name: string; sector: string | null } | null })[] | null;
+    error: { code?: string; message?: string } | null;
   };
 
-  return ((data ?? []) as unknown as Row[])
+  async function runQuery(selectCols: string): Promise<Resp> {
+    let q = client
+      .from("predictions")
+      .select(selectCols)
+      .eq("user_id", userId)
+      .order("prediction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (filter === "pending") q = q.eq("resolved", false);
+    else if (filter === "resolved") q = q.eq("resolved", true);
+    return (await q) as Resp;
+  }
+
+  let res = await runQuery(baseSelect);
+  if (res.error && isMissingColumnError(res.error)) {
+    console.warn(
+      "[bets] price_at_placement column missing; falling back to legacy SELECT",
+    );
+    res = await runQuery(legacySelect);
+  }
+  if (res.error) {
+    throw new Error(`fetchUserBetHistory: ${res.error.message}`);
+  }
+
+  return (res.data ?? [])
     .filter((r) => r.stocks !== null)
-    .map((r) => {
-      const stock = r.stocks!;
-      return { ...r, stock } as BetHistoryRow;
-    });
+    .map((r) => ({
+      ...r,
+      price_at_placement: r.price_at_placement ?? null,
+      stock: r.stocks!,
+    }) as BetHistoryRow);
 }
 
 /** Aggregate stats for the history header strip. */

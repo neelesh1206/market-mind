@@ -83,13 +83,30 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
   // null on any failure; the RPC accepts NULL for p_price_at_placement.
   const priceAtPlacement = await fetchLivePrice(input.ticker);
 
-  const { data, error } = await supabase.rpc("place_bet", {
+  let { data, error } = await supabase.rpc("place_bet", {
     p_stock_id: input.stockId,
     p_direction: input.direction,
     p_credits: input.credits,
     p_prediction_date: schedule.tradingDayLabel,
     p_price_at_placement: priceAtPlacement,
   });
+
+  // Migration for price_at_placement hasn't applied yet — retry with the
+  // legacy 4-arg signature so the bet still goes through. Once the
+  // migration lands, this branch becomes unreachable.
+  if (error && /could not find the function|PGRST202/i.test(error.message ?? "")) {
+    console.warn(
+      "[placeBet] place_bet 5-arg signature not deployed yet; retrying legacy 4-arg",
+    );
+    const retry = await supabase.rpc("place_bet", {
+      p_stock_id: input.stockId,
+      p_direction: input.direction,
+      p_credits: input.credits,
+      p_prediction_date: schedule.tradingDayLabel,
+    });
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error("placeBet: rpc failed", {
