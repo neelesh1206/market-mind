@@ -16,6 +16,8 @@ from typing import Literal
 # inside that class keeps `compute_verdict` (the pure-math entry point)
 # importable in test environments that don't install the ML deps.
 
+from . import _hf_breaker
+
 log = logging.getLogger("marketmind.verdict")
 
 WEIGHTS_V1: dict[str, float] = {
@@ -136,6 +138,13 @@ class VerdictReasoner:
         self._client = InferenceClient(**kwargs)  # type: ignore[arg-type]
 
     def explain(self, *, ticker: str, verdict: Verdict) -> str | None:
+        # Circuit-breaker short-circuit: if HF is clearly broken this run,
+        # go straight to the rule-based fallback instead of waiting on
+        # another 90s timeout.
+        if _hf_breaker.should_skip():
+            _hf_breaker.record_skip()
+            return _fallback_reasoning(verdict)
+
         scores = verdict.bucket_scores
         prompt = PROMPT.format(
             ticker=ticker,
@@ -158,10 +167,15 @@ class VerdictReasoner:
         except HfHubHTTPError as e:
             status = e.response.status_code if getattr(e, "response", None) else "?"
             log.warning("reasoner_http ticker=%s status=%s err=%s", ticker, status, str(e)[:150])
+            _hf_breaker.record_failure(f"reasoner_http_{status}")
             return _fallback_reasoning(verdict)
         except Exception as e:  # noqa: BLE001
             log.warning("reasoner_failed ticker=%s err=%s", ticker, str(e)[:150])
+            _hf_breaker.record_failure(f"reasoner_{type(e).__name__}")
             return _fallback_reasoning(verdict)
+
+        # Successful round-trip — clear the breaker.
+        _hf_breaker.record_success()
 
         try:
             raw = (response.choices[0].message.content or "").strip()

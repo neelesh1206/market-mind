@@ -34,6 +34,7 @@ from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
 from ..fetchers.types import NewsArticle
+from . import _hf_breaker
 
 log = logging.getLogger("marketmind.summarizer")
 
@@ -113,6 +114,12 @@ class LlamaSummarizer:
         if not body and not article.headline:
             return
 
+        # Circuit-breaker short-circuit: if HF has failed repeatedly this
+        # run, skip immediately instead of paying another 90s timeout.
+        if _hf_breaker.should_skip():
+            _hf_breaker.record_skip()
+            return
+
         prompt = PROMPT_TEMPLATE.format(
             ticker=ticker,
             headline=article.headline,
@@ -138,13 +145,18 @@ class LlamaSummarizer:
                 "llama_http url=%s status=%s err=%s body=%r",
                 article.url, status, str(e)[:200], body_repr,
             )
+            _hf_breaker.record_failure(f"summarizer_http_{status}")
             return
         except Exception as e:  # noqa: BLE001
             log.warning(
                 "llama_failed url=%s type=%s err=%s",
                 article.url, type(e).__name__, str(e)[:300],
             )
+            _hf_breaker.record_failure(f"summarizer_{type(e).__name__}")
             return
+
+        # Successful round-trip — clear the breaker.
+        _hf_breaker.record_success()
 
         try:
             raw = response.choices[0].message.content

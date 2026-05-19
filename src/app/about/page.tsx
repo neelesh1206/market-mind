@@ -208,10 +208,14 @@ export default async function AboutPage() {
               </li>
             </ul>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              Both run on HuggingFace&apos;s inference API. If either fails or times out, the
-              pipeline degrades gracefully: sentiment falls back to whichever articles did score
-              successfully, and verdict reasoning falls back to a rule-based template. The
-              numerical signal is never blocked by an LLM hiccup.
+              FinBERT runs locally on the pipeline runner — model and tokenizer load once,
+              inference happens in-process, no network round-trips per article. The Llama / Mistral
+              call still goes over HuggingFace&apos;s inference API because 7B-parameter models
+              don&apos;t fit on a free CI runner. If the LLM call fails or times out, the pipeline
+              degrades gracefully: verdict reasoning falls back to a rule-based template. A shared
+              circuit breaker bounds the cost of an HF outage to a handful of calls before the rest
+              of the run short-circuits to the fallback path. The numerical signal is never blocked
+              by an LLM hiccup.
             </p>
           </div>
 

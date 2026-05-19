@@ -241,12 +241,18 @@ async def run(args: argparse.Namespace) -> int:
             error_summary={"errors": stats["errors"][:10]} if stats["errors"] else None,
         )
 
+    from .processors._hf_breaker import snapshot as _hf_snapshot
+
+    hf = _hf_snapshot()
     log.info(
-        "pipeline_done status=%s processed=%s ok=%s failed=%s",
+        "pipeline_done status=%s processed=%s ok=%s failed=%s "
+        "hf_tripped=%s hf_skipped=%s",
         status,
         stats["processed"],
         stats["sources_succeeded"],
         stats["sources_failed"],
+        hf["tripped"],
+        hf["skipped"],
     )
     return 0 if status == "success" else 1
 

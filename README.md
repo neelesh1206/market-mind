@@ -30,10 +30,10 @@ Each bucket is normalized to `[−1, +1]`. The verdict is a weighted average; th
 
 ### Two AI models do the parts math can't
 
-- **[FinBERT](https://huggingface.co/ProsusAI/finbert)** reads each news article and labels it positive / neutral / negative. We use it instead of keyword matching because financial language depends on context — *"raised guidance"* is bullish, but *"raised concerns"* is bearish.
-- **Llama-3 / Mistral** turns the verdict + bucket scores into the one-sentence English explanation under the verdict chip — *"Bullish — driven by strong analyst upgrades and a constructive technical setup."*
+- **[FinBERT](https://huggingface.co/ProsusAI/finbert)** reads each news article and labels it positive / neutral / negative. We use it instead of keyword matching because financial language depends on context — *"raised guidance"* is bullish, but *"raised concerns"* is bearish. FinBERT runs **locally on the pipeline runner** via `transformers` + CPU-only `torch` — no network round-trips per article, no shared rate limits.
+- **Llama-3 / Mistral** turns the verdict + bucket scores into the one-sentence English explanation under the verdict chip — *"Bullish — driven by strong analyst upgrades and a constructive technical setup."* This still runs on HuggingFace's Inference API because 7B-param models don't fit on a free CI runner. A shared circuit breaker short-circuits to the rule-based fallback after N consecutive HF failures, so an HF outage caps the cost at a handful of calls instead of bleeding the whole run.
 
-Both run on HuggingFace's Inference API. If either fails, the pipeline degrades gracefully: sentiment falls back to whichever articles did score, and the verdict reasoning falls back to a rule-based template. The numerical signal is never blocked by an LLM hiccup.
+If either model fails, the numerical signal is never blocked. Sentiment falls back to whichever articles did score, verdict reasoning falls back to a deterministic template.
 
 ### Track record is public
 

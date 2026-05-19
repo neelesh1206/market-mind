@@ -57,7 +57,11 @@ jobs:
           cache-dependency-path: pipeline/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r pipeline/requirements.txt
+        # CPU-only torch wheel; same extra-index as fetch-insights for
+        # consistency, even though the resolution job doesn't import torch
+        # directly. The wheel is still pulled because it's listed in
+        # requirements.txt — keeping resolution's install reproducible.
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r pipeline/requirements.txt
 
       - name: Run resolution
         run: |

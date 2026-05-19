@@ -1,15 +1,30 @@
 """
-FinBERT sentiment processor via HuggingFace `InferenceClient`.
+FinBERT sentiment processor — runs the model LOCALLY (CPU) on the
+pipeline runner, not via HuggingFace's Inference API.
 
-HuggingFace migrated from the legacy `api-inference.huggingface.co` endpoint
-to the new Inference Providers routing (`router.huggingface.co`). The
-`huggingface_hub` Python library handles this transparently — we use it
-instead of raw HTTP so we don't have to track endpoint changes ourselves.
+Why local
+---------
+The HF Inference Providers router rate-limits (429s) and times out (cold
+starts) frequently enough that running ~500 article classifications per
+nightly batch through the network reliably blows our 45-min GH Actions
+budget. FinBERT is ~440 MB and runs on CPU in well under a second per
+article when batched — well within the runner's resources. Running it
+locally removes the largest source of HF round-trips from the critical
+path, eliminates the cold-start tax entirely, and is free.
 
-Free tier is plenty for our scale (~500 inferences/nightly batch). The first
-call to a "cold" model can take 10-30s while it loads — subsequent calls
-are fast. We swallow individual failures so one bad article doesn't kill
-the batch.
+Architecture
+------------
+- Model + tokenizer are loaded lazily on first `score()` call; subsequent
+  pipeline runs reuse the HuggingFace on-disk cache (~/.cache/huggingface).
+- We process all articles for a stock in a single batched forward pass —
+  much faster than the previous batches-of-3 pattern that existed to
+  avoid saturating the HF router.
+- The function is sync at its core; we wrap it in `asyncio.to_thread`
+  so the orchestrator's event loop stays responsive while the CPU works.
+
+The constructor still accepts an `api_key` argument for backwards
+compatibility with the orchestrator's `if cfg.huggingface_api_key:` gate,
+but the value is no longer used by the sentiment path.
 """
 from __future__ import annotations
 
@@ -17,79 +32,103 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
-
 from ..fetchers.types import NewsArticle
 
 log = logging.getLogger("marketmind.sentiment")
 
 MODEL = "ProsusAI/finbert"
+# Cap per-article token count. FinBERT was trained on financial sentences
+# (max ~256 tokens); longer inputs get truncated. We also pre-truncate
+# the character stream so the tokenizer doesn't waste cycles on the tail.
+MAX_TOKENS = 256
+MAX_BATCH = 16
 
 
 class FinBertSentimentProcessor:
-    """Batch-scores articles. Mutates the `NewsArticle.sentiment` field in place."""
+    """Local FinBERT — runs on the pipeline runner. No HF round-trips."""
 
-    def __init__(self, api_key: str, *, max_chars: int = 800) -> None:
-        if not api_key:
-            raise ValueError("HUGGINGFACE_API_KEY required")
-        # 90s leaves headroom for FinBERT cold starts + HF router latency.
-        # The serverless model can take 10-30s to load on first hit per
-        # region; the router itself adds another 5-15s when routing to a
-        # paid provider; subsequent warm calls are <1s.
-        self._client = InferenceClient(model=MODEL, token=api_key, timeout=90)
+    def __init__(self, api_key: str | None = None, *, max_chars: int = 800) -> None:
+        # api_key kept for orchestrator compatibility; not used by local path.
+        del api_key
         self.max_chars = max_chars
+        self._tokenizer = None
+        self._model = None
+        self._id2label: dict[int, str] = {}
+        self._torch = None  # imported lazily to avoid 800 MB module load when sentiment is disabled
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None:
+            return
+        log.info("finbert_loading model=%s", MODEL)
+        # Lazy imports — heavyweight, only paid when sentiment actually runs.
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        self._torch = torch
+        self._tokenizer = AutoTokenizer.from_pretrained(MODEL)
+        self._model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+        self._model.eval()  # inference mode — disables dropout, saves memory
+        self._id2label = {
+            int(k): v.lower() for k, v in self._model.config.id2label.items()
+        }
+        log.info("finbert_loaded id2label=%s", self._id2label)
 
     async def score(self, articles: list[NewsArticle]) -> None:
-        """Populate `article.sentiment` for each input.
-
-        We process in batches of 3 rather than all-at-once because firing
-        all-N article calls in parallel saturates the HF router and we
-        see timeout errors on the tail. Batches of 3 keep us under the
-        router's per-second cap while still finishing a 10-article batch
-        in ~10s.
-        """
+        """Populate `article.sentiment` for each input in place."""
         if not articles:
             return
+        # CPU work runs in a thread so the orchestrator's gather() over
+        # fetchers + processors stays responsive.
+        await asyncio.to_thread(self._score_batch, articles)
 
-        BATCH = 3
-        for start in range(0, len(articles), BATCH):
-            chunk = articles[start : start + BATCH]
-            await asyncio.gather(
-                *(asyncio.to_thread(self._score_one, a) for a in chunk),
-                return_exceptions=True,
+    def _score_batch(self, articles: list[NewsArticle]) -> None:
+        self._ensure_loaded()
+        assert self._tokenizer is not None and self._model is not None
+        assert self._torch is not None
+
+        # Collect (article_index, text) pairs for articles that have text.
+        indexed = [
+            (i, self._truncate(a.body or a.headline)) for i, a in enumerate(articles)
+        ]
+        indexed = [(i, t) for i, t in indexed if t]
+        if not indexed:
+            return
+
+        # FinBERT on CPU handles 16+ items per forward pass comfortably;
+        # cap batch size as a defensive memory guard for runs with many articles.
+        for start in range(0, len(indexed), MAX_BATCH):
+            chunk = indexed[start : start + MAX_BATCH]
+            idxs = [i for i, _ in chunk]
+            texts = [t for _, t in chunk]
+
+            inputs = self._tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                max_length=MAX_TOKENS,
+                return_tensors="pt",
             )
+            with self._torch.no_grad():
+                logits = self._model(**inputs).logits
+            probs = self._torch.nn.functional.softmax(logits, dim=-1)
 
-    def _score_one(self, article: NewsArticle) -> None:
-        text = self._truncate(article.body or article.headline)
-        if not text:
-            return
-
-        try:
-            results = self._client.text_classification(text)
-        except HfHubHTTPError as e:
-            log.warning("finbert_http url=%s status=%s", article.url, e.response.status_code if e.response else "?")
-            return
-        except Exception as e:  # noqa: BLE001
-            log.warning("finbert_failed url=%s err=%s", article.url, e)
-            return
-
-        # InferenceClient returns a list of {label, score} dicts.
-        # FinBERT labels: 'positive', 'neutral', 'negative'.
-        scores: dict[str, float] = {}
-        for entry in results or []:
-            label = entry.label.lower() if hasattr(entry, "label") else (entry.get("label") or "").lower()
-            score = entry.score if hasattr(entry, "score") else float(entry.get("score", 0.0))
-            scores[label] = float(score)
-
-        positive = scores.get("positive", 0.0)
-        negative = scores.get("negative", 0.0)
-        article.sentiment = round(positive - negative, 3)
+            for article_idx, prob_row in zip(idxs, probs, strict=True):
+                scores = {
+                    self._id2label[i]: float(p) for i, p in enumerate(prob_row.tolist())
+                }
+                positive = scores.get("positive", 0.0)
+                negative = scores.get("negative", 0.0)
+                articles[article_idx].sentiment = round(positive - negative, 3)
 
     def _truncate(self, text: str | None) -> str:
         if not text:
             return ""
         return text[: self.max_chars]
+
+
+# ---------------------------------------------------------------------------
+# Aggregation helpers — unchanged from the API-based implementation.
+# ---------------------------------------------------------------------------
 
 
 def aggregate_sentiment(articles: list[NewsArticle]) -> tuple[float | None, int]:
@@ -113,7 +152,11 @@ def aggregate_sentiment(articles: list[NewsArticle]) -> tuple[float | None, int]
         if not a.published_at:
             hours_old = 24.0
         else:
-            published = a.published_at if a.published_at.tzinfo else a.published_at.replace(tzinfo=timezone.utc)
+            published = (
+                a.published_at
+                if a.published_at.tzinfo
+                else a.published_at.replace(tzinfo=timezone.utc)
+            )
             hours_old = max((now - published).total_seconds() / 3600, 0)
 
         weight = _recency_weight(hours_old)

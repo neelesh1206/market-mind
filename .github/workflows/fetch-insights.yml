@@ -37,7 +37,11 @@ jobs:
     name: Fetch + compute insights
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 45
+    # 60 min: gives headroom for the one-time FinBERT model warm-up on a
+    # fresh runner (~30s after cache, ~3 min cold) plus the LLM
+    # summarizer/reasoner which still go over the network. Most runs land
+    # well under 30 min once the HF model cache is warm.
+    timeout-minutes: 60
 
     env:
       # Supabase
@@ -85,7 +89,23 @@ jobs:
           cache-dependency-path: pipeline/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r pipeline/requirements.txt
+        # CPU-only torch wheel comes from PyTorch's index. The extra-index
+        # is consulted only when a matching wheel isn't on PyPI, so the
+        # rest of the requirements still resolve from PyPI as usual.
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r pipeline/requirements.txt
+
+      - name: Cache HuggingFace model files
+        # FinBERT (~440 MB) downloads to ~/.cache/huggingface on first
+        # load; caching it across runs keeps the warm-up to ~30s instead
+        # of the ~3 min cold pull. Key is content-addressed by the
+        # sentiment processor + requirements so a model bump invalidates
+        # the cache automatically.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('pipeline/processors/sentiment.py', 'pipeline/requirements.txt') }}
+          restore-keys: |
+            hf-models-
 
       - name: Print pipeline plan
         run: |

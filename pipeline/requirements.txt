@@ -21,7 +21,19 @@ postgrest==0.18.0
 # --- NLP via HuggingFace Inference Providers ---
 # >=0.28 includes the Inference Providers routing that replaced the legacy
 # api-inference.huggingface.co URL pattern (which now 404s for many models).
+# Still used by the LLM-side summarizer + verdict reasoner; FinBERT moved
+# to local execution (see transformers/torch below) to escape the router's
+# rate-limit / cold-start tax on the hot sentiment path.
 huggingface-hub>=0.28.0,<0.31
+
+# --- Local FinBERT (sentiment) ---
+# transformers loads the model + tokenizer; torch runs the forward pass.
+# CPU-only torch wheel keeps install size sane (~200 MB vs 800 MB for CUDA).
+# Install via:
+#   pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+# (the GH Actions workflow handles this; locally you may want a venv).
+transformers>=4.40,<5
+torch>=2.2,<3
 
 # --- Reddit ---
 praw==7.8.1
