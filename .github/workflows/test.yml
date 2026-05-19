@@ -1,0 +1,146 @@
+name: Tests
+
+# Runs lint + typecheck + Vitest + pytest on every push to main and every
+# PR. Catches regressions before they hit prod. Direct-to-main pushes still
+# get checked (the workflow runs after the push) — but ideally future
+# changes go through PRs so we get the check BEFORE the merge.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # JavaScript / TypeScript: lint + typecheck + Vitest + coverage.
+  # Runs against `src/` and `tests/` (excluding e2e which has its own job).
+  # ---------------------------------------------------------------------
+  js:
+    name: JS / TS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Vitest + coverage
+        # `test:coverage` runs vitest with v8 coverage and writes:
+        #   coverage/coverage-summary.json — for PR summary
+        #   coverage/lcov.info — for any code-coverage tooling
+        #   coverage/index.html — human-readable browse
+        # Thresholds enforce a minimum bar (currently 5% — bumps later).
+        run: npm run test:coverage
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-coverage
+          path: coverage/
+          retention-days: 14
+
+      - name: Coverage summary in job log
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            echo "### JS/TS coverage" >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '| Metric | % | Covered / Total |' >> $GITHUB_STEP_SUMMARY
+            echo '|---|---|---|' >> $GITHUB_STEP_SUMMARY
+            node -e "
+              const s = require('./coverage/coverage-summary.json').total;
+              for (const k of ['lines','statements','functions','branches']) {
+                console.log(\`| \${k} | \${s[k].pct}% | \${s[k].covered}/\${s[k].total} |\`);
+              }
+            " >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ---------------------------------------------------------------------
+  # Python pipeline: pytest + coverage.
+  # ---------------------------------------------------------------------
+  python:
+    name: Python pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install pipeline deps
+        # Use the CPU-only torch wheel so install stays under ~200MB.
+        # Same flag as fetch-insights.yml — keeps test env in sync.
+        run: |
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+            -r pipeline/requirements.txt
+
+      - name: Pytest + coverage
+        # cov for the pipeline source only. Threshold low to start; ratchet
+        # up as #133 lands more tests. --cov-fail-under enforces it in CI.
+        run: |
+          pytest pipeline/tests/ \
+            --cov=pipeline \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=0
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: |
+            htmlcov/
+            coverage.xml
+          retention-days: 14
+
+      - name: Coverage summary in job log
+        if: always()
+        run: |
+          if [ -f coverage.xml ]; then
+            echo "### Python coverage" >> $GITHUB_STEP_SUMMARY
+            python -c "
+            import xml.etree.ElementTree as ET
+            tree = ET.parse('coverage.xml')
+            root = tree.getroot()
+            line_rate = float(root.attrib.get('line-rate', 0)) * 100
+            branch_rate = float(root.attrib.get('branch-rate', 0)) * 100
+            print(f'')
+            print(f'| Metric | % |')
+            print(f'|---|---|')
+            print(f'| Lines | {line_rate:.1f}% |')
+            print(f'| Branches | {branch_rate:.1f}% |')
+            " >> $GITHUB_STEP_SUMMARY
+          fi

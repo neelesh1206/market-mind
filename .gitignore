@@ -57,3 +57,9 @@ pipeline/.env
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Coverage
+/coverage/
+/htmlcov/
+coverage.xml
+.coverage

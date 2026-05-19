@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated test/coverage output — third-party HTML/JS, never linted.
+    "coverage/**",
+    "htmlcov/**",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

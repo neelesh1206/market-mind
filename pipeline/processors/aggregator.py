@@ -142,28 +142,93 @@ def professional_score(
 
 
 def social_score(s: SocialSnapshot | None) -> tuple[float | None, dict[str, Any]]:
+    """
+    Social bucket — reframed in ADR 0013.
+
+    The old implementation treated every positive social signal as bullish.
+    The academic literature (Barber & Odean 2008; Da, Engelberg & Gao 2011)
+    is consistent that *retail attention spikes precede underperformance*
+    for non-meme tickers: the crowd shows up after the news is priced, and
+    latecomers buy the top. Treating mention deltas and top-WSB rank as
+    bullish was an inverted-sign error.
+
+    New design splits the bucket into two components:
+
+    1. HERDING (Reddit delta + ApeWisdom rank) — contributes NEGATIVELY
+       to the score, with magnitude scaling on intensity. Also computes
+       a 0..1 `herding_intensity` used to gate the directional component.
+
+    2. INFORMED SENTIMENT (StockTwits bullish ratio) — directional, but
+       weighted by message volume (the signal degrades to crowd noise
+       as message count rises) and further damped when herding intensity
+       is high (loud crowd → less faith in the directional read).
+
+    We do *not* invert the StockTwits ratio at peak herding; we damp it
+    toward zero. Inversion would require stronger empirical justification
+    than the literature currently supports.
+    """
     if s is None:
         return (None, {})
 
     components: dict[str, Any] = {}
     score = 0.0
+    herding_intensity = 0.0  # 0..1, used to damp the StockTwits contribution
 
+    # === Herding component — sign is NEGATIVE (fade the crowd) ===
     if s.reddit_mention_delta is not None:
         components["reddit_delta_pct"] = s.reddit_mention_delta
-        if s.reddit_mention_delta > 200:
-            score += 0.5
+        if s.reddit_mention_delta > 500:
+            score -= 0.4
+            herding_intensity = max(herding_intensity, 0.9)
+        elif s.reddit_mention_delta > 200:
+            score -= 0.2
+            herding_intensity = max(herding_intensity, 0.6)
         elif s.reddit_mention_delta < -50:
-            score -= 0.3
+            # Crowd losing interest — modest tailwind for fundamentals-driven
+            # names where attention had been masking signal.
+            score += 0.1
 
-    if s.apewisdom_rank is not None and s.apewisdom_rank <= 10:
-        score += 0.3
+    if s.apewisdom_rank is not None:
         components["apewisdom_rank"] = s.apewisdom_rank
+        if s.apewisdom_rank <= 3:
+            score -= 0.3
+            herding_intensity = max(herding_intensity, 1.0)
+        elif s.apewisdom_rank <= 10:
+            score -= 0.15
+            herding_intensity = max(herding_intensity, 0.7)
+        elif s.apewisdom_rank <= 25:
+            # Visible but not viral — registers as mild herding without a
+            # directional penalty of its own.
+            herding_intensity = max(herding_intensity, 0.4)
 
+    # === Informed-sentiment component — directional, damped by noise ===
     if s.stocktwits_bullish is not None:
-        normalized = (s.stocktwits_bullish - 50) / 100  # -0.5..0.5
-        score += normalized
         components["stocktwits_bullish_pct"] = s.stocktwits_bullish
+        bullish_signal = (s.stocktwits_bullish - 50) / 100  # -0.5..+0.5
 
+        # Volume gating: high message counts mean the ratio is dominated
+        # by the crowd, not informed traders. Thresholds are rough — the
+        # StockTwits API aggregates per-day so 2000+ is "viral", 500-2000
+        # is "active discussion", and <500 is "quiet conviction".
+        messages = s.stocktwits_messages or 0
+        if messages > 2000:
+            volume_weight = 0.3
+        elif messages > 500:
+            volume_weight = 0.7
+        else:
+            volume_weight = 1.0
+        components["stocktwits_volume_weight"] = volume_weight
+
+        # Herding damping: at peak herding intensity, dump 70% of the
+        # directional weight. The score doesn't flip sign — it shrinks
+        # toward zero, expressing reduced conviction rather than active
+        # contrarianism.
+        herding_damping = max(0.0, 1.0 - 0.7 * herding_intensity)
+        components["herding_damping"] = round(herding_damping, 2)
+
+        score += bullish_signal * volume_weight * herding_damping
+
+    components["herding_intensity"] = round(herding_intensity, 2)
     return (_clamp(score), components)
 
 
