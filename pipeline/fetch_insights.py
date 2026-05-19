@@ -179,7 +179,15 @@ async def run(args: argparse.Namespace) -> int:
 
     stats = {"processed": 0, "sources_succeeded": 0, "sources_failed": 0, "errors": []}
 
-    for stock in stocks:
+    # Inter-stock pacing — Massive's news endpoint throttles when we hammer
+    # 50 stocks back-to-back. A 1.2s sleep between stocks keeps us under any
+    # plausible per-second cap while still finishing a 50-stock batch in ~3
+    # minutes. The first stock has no pre-sleep.
+    INTER_STOCK_SLEEP_SECONDS = 1.2
+
+    for idx, stock in enumerate(stocks):
+        if idx > 0:
+            await asyncio.sleep(INTER_STOCK_SLEEP_SECONDS)
         try:
             await _process_stock(
                 stock=stock,

@@ -115,7 +115,10 @@ class AbstractFetcher(ABC, Generic[T]):
                 return FetchResult.success(self.name, data, latency_ms)
             except RateLimitError as e:
                 last_error = e
-                wait = self.backoff_base**attempt
+                # Start at 3s on first retry, then exponential. The previous
+                # 1s start was too aggressive — we hammered Massive into
+                # circuit-open before letting it recover.
+                wait = max(3.0, self.backoff_base**attempt * 2.0)
                 log.warning(
                     "rate_limited source=%s ticker=%s attempt=%s backoff=%.2fs",
                     self.name, ticker, attempt + 1, wait,
