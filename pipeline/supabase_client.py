@@ -36,8 +36,19 @@ def upsert_stock_insight(client: Client, payload: dict[str, Any]) -> dict[str, A
 
 
 def insert_articles(client: Client, articles: list[dict[str, Any]]) -> None:
+    """Insert top articles for an insight.
+
+    The schema has no natural-key uniqueness on (insight_id, headline) so a
+    naive INSERT would create duplicates whenever the pipeline re-runs for
+    the same date. To keep this idempotent we DELETE all rows for the
+    insight first, then INSERT the fresh batch. Cheap — articles are 1-3
+    rows per insight.
+    """
     if not articles:
         return
+    insight_ids = list({a["insight_id"] for a in articles if a.get("insight_id")})
+    if insight_ids:
+        client.table("insight_articles").delete().in_("insight_id", insight_ids).execute()
     client.table("insight_articles").insert(articles).execute()
 
 
