@@ -6,6 +6,7 @@ import { LogOut, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -50,12 +51,14 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="space-y-0.5 px-2 py-1.5">
-          <p className="truncate text-sm font-medium">{displayName}</p>
-          {displayName !== email && (
-            <p className="text-muted-foreground truncate text-xs font-normal">{email}</p>
-          )}
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="space-y-0.5 px-2 py-1.5">
+            <p className="truncate text-sm font-medium">{displayName}</p>
+            {displayName !== email && (
+              <p className="text-muted-foreground truncate text-xs font-normal">{email}</p>
+            )}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
 
