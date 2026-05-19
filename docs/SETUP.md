@@ -90,6 +90,12 @@ NEXT_PUBLIC_SENTRY_DSN=
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 MASSIVE_API_KEY=                # required for the stock detail sparkline (server-side only)
+# Sentry (optional — Sentry no-ops when DSN is unset, fine for local dev):
+# NEXT_PUBLIC_SENTRY_DSN=
+# Sentry source-map upload (CI/Vercel build env only):
+# SENTRY_ORG=
+# SENTRY_PROJECT=
+# SENTRY_AUTH_TOKEN=
 ```
 
 ### 4. Run dev server
