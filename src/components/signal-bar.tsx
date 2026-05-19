@@ -1,10 +1,12 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
+import { Landmark, LineChart, MessageSquare, Newspaper, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export type SignalVariant = "technical" | "sentiment" | "professional" | "social";
+
 type Props = {
-  icon: LucideIcon;
+  variant: SignalVariant;
   label: string;
   /** Bucket score in [-1, 1]. `null` = no data. */
   score: number | null;
@@ -21,9 +23,20 @@ type Props = {
  *   - negative (bearish) → fills left, red
  *   - near-zero or null  → muted track with no fill
  *
- * Renders a label, icon, score number, and an optional supporting detail line.
+ * We resolve the icon inside this client component (rather than receiving it
+ * as a prop) so a Server Component parent can render us without a
+ * server-to-client serialization error — lucide icons are functions and can't
+ * cross that boundary.
  */
-export function SignalBar({ icon: Icon, label, score, detail }: Props) {
+const ICON_BY_VARIANT: Record<SignalVariant, LucideIcon> = {
+  technical: LineChart,
+  sentiment: Newspaper,
+  professional: Landmark,
+  social: MessageSquare,
+};
+
+export function SignalBar({ variant, label, score, detail }: Props) {
+  const Icon = ICON_BY_VARIANT[variant];
   const clamped = score === null ? 0 : Math.max(-1, Math.min(1, score));
   const hasData = score !== null;
   const isBullish = hasData && clamped > 0.05;

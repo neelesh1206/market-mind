@@ -1,14 +1,5 @@
 import Link from "next/link";
-import {
-  ArrowDown,
-  ArrowUp,
-  ExternalLink,
-  Landmark,
-  LineChart,
-  MessageSquare,
-  Newspaper,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SignalBar } from "@/components/signal-bar";
 import { cn } from "@/lib/utils";
@@ -68,25 +59,25 @@ export function StockCard({ data }: Props) {
       {/* Signals */}
       <section className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2">
         <SignalBar
-          icon={LineChart}
+          variant="technical"
           label="Technical"
           score={insight?.technical_score ?? null}
           detail={technicalDetail(insight)}
         />
         <SignalBar
-          icon={Newspaper}
+          variant="sentiment"
           label="Sentiment"
           score={insight?.sentiment_score ?? null}
           detail={sentimentDetail(insight)}
         />
         <SignalBar
-          icon={Landmark}
+          variant="professional"
           label="Professional"
           score={insight?.professional_score ?? null}
           detail={professionalDetail(insight)}
         />
         <SignalBar
-          icon={MessageSquare}
+          variant="social"
           label="Social"
           score={insight?.social_score ?? null}
           detail={socialDetail(insight)}

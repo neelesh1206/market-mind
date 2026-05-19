@@ -69,17 +69,28 @@ class LlamaSummarizer:
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY required")
         self.model = os.getenv("HUGGINGFACE_SUMMARY_MODEL", DEFAULT_MODEL)
-        # Explicit provider — bypasses the "auto" routing that sometimes lands
-        # on a paid provider and returns opaque errors. `hf-inference` is the
-        # free serverless tier.
-        self._client = InferenceClient(
-            provider="hf-inference",
-            model=self.model,
-            token=api_key,
-            timeout=45,
-        )
+
+        # Provider routing:
+        # - Llama-3 / Llama-4 / etc. are gated and only served by paid providers
+        #   (Together, Nebius, Fireworks, etc.) — `hf-inference` rejects them
+        #   with "Model not supported by provider hf-inference".
+        # - HF Pro includes credits for the paid providers, so `auto` routing
+        #   works for Pro users.
+        # - For free-tier users on the default Mistral model, `auto` still
+        #   lands on `hf-inference` so nothing changes.
+        # An explicit override is available for advanced users.
+        provider = os.getenv("HUGGINGFACE_PROVIDER", "auto")
+        client_kwargs: dict[str, object] = {
+            "model": self.model,
+            "token": api_key,
+            "timeout": 45,
+        }
+        if provider != "auto":
+            client_kwargs["provider"] = provider
+
+        self._client = InferenceClient(**client_kwargs)  # type: ignore[arg-type]
         self.max_body_chars = max_body_chars
-        log.info("summarizer_init model=%s", self.model)
+        log.info("summarizer_init model=%s provider=%s", self.model, provider)
 
     async def summarize(self, articles: list[NewsArticle], *, ticker: str) -> None:
         if not articles:

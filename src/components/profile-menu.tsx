@@ -59,10 +59,7 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem
-          onSelect={() => router.push("/onboarding")}
-          className="cursor-pointer"
-        >
+        <DropdownMenuItem onSelect={() => router.push("/onboarding")} className="cursor-pointer">
           <Settings className="h-4 w-4" />
           <span>Manage stocks</span>
           <span className="text-muted-foreground ml-auto text-xs">{watchlistCount}</span>
