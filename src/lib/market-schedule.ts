@@ -85,7 +85,12 @@ function fromET(year: number, month: number, day: number, hour: number, minute: 
   return guess;
 }
 
-const PIPELINE_HOUR_ET = 20; // 8 PM
+const PIPELINE_HOUR_ET = 20; // 8 PM ET — pipeline START
+// Pipeline typically completes within this many minutes after start. Used to
+// communicate a *window* ("by ~8:25 PM ET") instead of pretending the drop is
+// instant at 8:00. Recent end-to-end runs cluster around 18 min; 25 gives
+// headroom for HF retries / slow article fetches without crying wolf.
+const PIPELINE_TYPICAL_DURATION_MIN = 25;
 const MARKET_OPEN_HOUR_ET = 9;
 const MARKET_OPEN_MIN_ET = 30;
 const MARKET_CLOSE_HOUR_ET = 16; // 4 PM
@@ -126,15 +131,37 @@ export type MarketState =
   | "post-close" // weekday 4:00 PM – next-day pipeline
   | "weekend"; // Saturday / Sunday
 
+/**
+ * Granular phase of the daily cycle — used to drive headline copy.
+ * Distinguishes "bet open during market" from "bet locked but market open"
+ * etc, which the coarser `MarketState` doesn't.
+ */
+export type CyclePhase =
+  | "pre-market-bet-open" // before 9:30 AM weekday, bet window already open from prior 8 PM
+  | "market-open-bet-open" // 9:30 AM – 1 PM ET, both bet + market open
+  | "market-open-bet-locked" // 1 PM – 4 PM ET, market still open but bets locked
+  | "post-resolution" // 4:15 PM – 8 PM ET, today done, tomorrow not yet computed
+  | "pipeline-running" // 8:00 PM – ~8:25 PM ET, pipeline crunching tomorrow's data
+  | "after-pipeline" // ~8:25 PM – next-day 9:30 AM, fresh predictions, bet window open
+  | "weekend"; // Saturday / Sunday
+
 export type MarketSchedule = {
-  /** Current state in the trading day cycle. */
+  /** Coarse market state (preserved for backwards-compatible UI logic). */
   state: MarketState;
+  /** Granular cycle phase, used for state-aware headline copy. */
+  phase: CyclePhase;
   /** Trading day that currently-visible insights apply to (ISO yyyy-mm-dd). */
   tradingDayLabel: string;
   /** Human-readable trading day, e.g. "Monday, Oct 21". */
   tradingDayHuman: string;
-  /** When the next pipeline runs (writes new insights). */
+  /** When the next pipeline run STARTS (cron trigger). */
   nextPipelineRun: Date;
+  /**
+   * When fresh insights are expected to be queryable — i.e. pipeline start +
+   * typical duration. Use this in UX copy ("predictions live by ~8:25 PM ET")
+   * so users aren't told 8:00 and then wait staring at stale data.
+   */
+  nextPipelineCompletion: Date;
   /** When the bet window closes for the current trading day (null if already closed). */
   betWindowClosesAt: Date | null;
   /** When the bet window opens for the next trading day. */
@@ -162,6 +189,9 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
   // Helpers
   const todayDate = { year: nowET.year, month: nowET.month, day: nowET.day };
   const pipelineToday = fromET(todayDate.year, todayDate.month, todayDate.day, PIPELINE_HOUR_ET, 0);
+  const pipelineCompleteToday = new Date(
+    pipelineToday.getTime() + PIPELINE_TYPICAL_DURATION_MIN * 60_000,
+  );
   const marketOpenToday = fromET(
     todayDate.year,
     todayDate.month,
@@ -188,9 +218,11 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
   if (isWeekend(nowET.weekday)) {
     // Weekend: insights apply to next Monday (pipeline ran Friday 8 PM)
     tradingDate = nextWeekdayStart(now);
-  } else if (now.getTime() >= pipelineToday.getTime()) {
-    // After tonight's 8 PM pipeline run: insights are for tomorrow's trading day
-    // (or Monday if today is Friday)
+  } else if (now.getTime() >= pipelineCompleteToday.getTime()) {
+    // After tonight's pipeline has completed: insights are for tomorrow's
+    // trading day (or Monday if today is Friday). We deliberately wait for
+    // *completion*, not the 8 PM start — during the run the DB still holds
+    // yesterday's verdict and we shouldn't claim tomorrow's is "live".
     tradingDate = nextWeekdayStart(new Date(now.getTime() + 86400_000));
   } else {
     // Pre-pipeline today: insights are for TODAY's trading day
@@ -255,11 +287,37 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
     state = "post-close";
   }
 
+  // Granular phase — drives the state-aware headline copy.
+  let phase: CyclePhase;
+  if (state === "weekend") {
+    phase = "weekend";
+  } else if (state === "pre-market") {
+    phase = "pre-market-bet-open"; // bet window opened last 8 PM, still open
+  } else if (state === "open") {
+    phase = betWindowOpen ? "market-open-bet-open" : "market-open-bet-locked";
+  } else {
+    // post-close: bet window already closed; tomorrow's predictions come at 8 PM.
+    // Three sub-phases: waiting → running → done.
+    if (now.getTime() < pipelineToday.getTime()) {
+      phase = "post-resolution";
+    } else if (now.getTime() < pipelineCompleteToday.getTime()) {
+      phase = "pipeline-running";
+    } else {
+      phase = "after-pipeline";
+    }
+  }
+
+  const nextPipelineCompletion = new Date(
+    nextPipelineRun.getTime() + PIPELINE_TYPICAL_DURATION_MIN * 60_000,
+  );
+
   return {
     state,
+    phase,
     tradingDayLabel,
     tradingDayHuman,
     nextPipelineRun,
+    nextPipelineCompletion,
     betWindowClosesAt,
     betWindowOpensAt,
     betWindowOpen,

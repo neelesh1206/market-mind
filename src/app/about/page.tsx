@@ -452,13 +452,13 @@ otherwise             →  NEUTRAL`}
           <h2 className="text-2xl font-semibold">Update cadence</h2>
           <ul className="text-muted-foreground space-y-1.5 text-sm leading-relaxed">
             <li>
-              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline runs the
-              night before. Fresh insights + verdict for the next trading day are computed and
-              locked.
+              <span className="text-foreground font-mono">8:00 PM ET</span> — pipeline kicks off
+              the night before. Crunching ~50 stocks (news, social, technicals, FinBERT, Llama
+              summaries) typically takes 15–25 minutes.
             </li>
             <li>
-              <span className="text-foreground font-mono">8:00 PM ET</span> — bet window opens for
-              the next trading day.
+              <span className="text-foreground font-mono">~8:25 PM ET</span> — pipeline completes.
+              Fresh insights + verdict for the next trading day are live; bet window opens.
             </li>
             <li>
               <span className="text-foreground font-mono">9:30 AM ET</span> — market opens. Bet
