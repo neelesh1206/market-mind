@@ -58,19 +58,27 @@ export async function fetchHomeFeed(
         .select("*")
         .in("insight_id", insightIds)
         .eq("display_rank", 1),
-      client.from("marketmind_predictions").select("*").in("insight_id", insightIds),
+      // Defensive: the marketmind_predictions table is a recent migration;
+      // a missing-table error here shouldn't 500 the whole feed.
+      client
+        .from("marketmind_predictions")
+        .select("*")
+        .in("insight_id", insightIds),
     ]);
     if (articlesRes.error) {
       throw new Error(`fetchHomeFeed articles: ${articlesRes.error.message}`);
     }
     if (verdictsRes.error) {
-      throw new Error(`fetchHomeFeed verdicts: ${verdictsRes.error.message}`);
+      console.warn(
+        `[feed] marketmind_predictions query failed (likely migration not applied): ${verdictsRes.error.message}`,
+      );
+    } else {
+      for (const row of (verdictsRes.data ?? []) as MarketMindPrediction[]) {
+        verdictByStock.set(row.stock_id, row);
+      }
     }
     for (const row of (articlesRes.data ?? []) as InsightArticle[]) {
       articleByInsight.set(row.insight_id, row);
-    }
-    for (const row of (verdictsRes.data ?? []) as MarketMindPrediction[]) {
-      verdictByStock.set(row.stock_id, row);
     }
   }
 
@@ -100,7 +108,12 @@ export async function fetchTrackRecord(
     .neq("outcome", "VOID");
 
   if (error) {
-    throw new Error(`fetchTrackRecord: ${error.message}`);
+    // Defensive: pre-migration the table may not exist yet. Report empty
+    // track record rather than blowing up the page that called us.
+    console.warn(
+      `[feed] fetchTrackRecord failed (likely migration not applied): ${error.message}`,
+    );
+    return { total: 0, correct: 0, accuracy: null };
   }
   const rows = data ?? [];
   const total = rows.length;

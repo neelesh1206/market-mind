@@ -67,10 +67,14 @@ export async function fetchStockDetail(
       throw new Error(`fetchStockDetail articles: ${articlesRes.error.message}`);
     }
     if (verdictRes.error) {
-      throw new Error(`fetchStockDetail verdict: ${verdictRes.error.message}`);
+      // Defensive: marketmind_predictions table may not exist pre-migration.
+      console.warn(
+        `[stock-detail] verdict query failed (likely migration not applied): ${verdictRes.error.message}`,
+      );
+    } else {
+      verdict = (verdictRes.data as MarketMindPrediction | null) ?? null;
     }
     articles = (articlesRes.data ?? []) as InsightArticle[];
-    verdict = (verdictRes.data as MarketMindPrediction | null) ?? null;
   }
 
   return {
