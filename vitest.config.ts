@@ -29,16 +29,17 @@ export default defineConfig({
         "src/app/**/not-found.tsx",
         "src/instrumentation*.ts",
       ],
-      // Thresholds intentionally at 0 to start — measured coverage is
-      // currently 0.06% (one test file on `cn`). #132 will land real unit
-      // tests; bump these to 30/30/30/40 (lines/statements/functions/
-      // branches) once that batch lands. The goal is to ratchet up over
-      // time, not block the first commit.
+      // Bumped from 0 → these floors after #132 landed real unit tests on
+      // market-schedule (98%), verdict (100%), bonus (94%), bets, badges.
+      // Current totals (May 2026): lines 10.79%, statements 10.8%, functions
+      // 7.69%, branches 5.74%. Floors set just below so a routine drop
+      // doesn't immediately red-CI; ratchet up as more helpers gain
+      // coverage in follow-up tasks.
       thresholds: {
-        lines: 0,
-        functions: 0,
-        branches: 0,
-        statements: 0,
+        lines: 10,
+        functions: 7,
+        branches: 5,
+        statements: 10,
       },
     },
   },
