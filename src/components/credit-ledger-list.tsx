@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowDown, ArrowUp, Coins } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/empty-state";
 import type { CreditLedgerRow } from "@/lib/bets";
 
 type Props = {
@@ -18,10 +19,11 @@ type Props = {
 export function CreditLedgerList({ rows }: Props) {
   if (rows.length === 0) {
     return (
-      <div className="text-muted-foreground border-border/60 rounded-xl border border-dashed p-10 text-center text-sm">
-        <p className="text-foreground mb-1 font-medium">No credit activity yet</p>
-        <p>Your signup bonus + every bet you place will show up here.</p>
-      </div>
+      <EmptyState
+        icon={Coins}
+        title="No credit activity yet"
+        description="Your signup bonus + every bet you place will show up here."
+      />
     );
   }
 

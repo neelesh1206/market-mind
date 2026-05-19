@@ -1,5 +1,6 @@
-import { Crown, Medal } from "lucide-react";
+import { Crown, Medal, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/empty-state";
 import type { LeaderboardRow } from "@/lib/leaderboard";
 
 type Props = {
@@ -16,10 +17,11 @@ type Props = {
 export function LeaderboardTable({ rows, currentUserId }: Props) {
   if (rows.length === 0) {
     return (
-      <div className="text-muted-foreground border-border/60 rounded-xl border border-dashed p-10 text-center text-sm">
-        <p className="text-foreground mb-1 font-medium">No qualifiers this week yet</p>
-        <p>The leaderboard recomputes every Sunday. First qualifier needs 5+ resolved bets.</p>
-      </div>
+      <EmptyState
+        icon={Trophy}
+        title="No qualifiers this week yet"
+        description="The leaderboard recomputes every Sunday evening. First qualifier needs 5+ resolved bets in the week."
+      />
     );
   }
 

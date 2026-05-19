@@ -2,10 +2,11 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, Loader2, Plus, Search, X } from "lucide-react";
+import { Check, Loader2, Plus, Search, SearchX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/empty-state";
 import { addToWatchlist, removeFromWatchlist } from "@/app/actions/watchlist";
 import type { Stock } from "@/lib/watchlist";
 
@@ -148,9 +149,15 @@ export function StockBrowser({ stocks, initialWatchlistIds, watchlistMax }: Prop
 
       {/* List */}
       {visible.length === 0 ? (
-        <div className="text-muted-foreground border-border/40 rounded-xl border border-dashed p-10 text-center text-sm">
-          No stocks match {query ? `"${query}"` : "this filter"}.
-        </div>
+        <EmptyState
+          icon={SearchX}
+          title="No stocks match"
+          description={
+            query
+              ? `Nothing in the pool matched "${query}". Try a different ticker or company name.`
+              : "Try another sector or clear filters."
+          }
+        />
       ) : (
         <ul className="divide-border/40 border-border/60 bg-card/30 divide-y rounded-xl border">
           {visible.map((s) => {

@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Clock } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/empty-state";
 import type { BetHistoryRow } from "@/lib/bets";
 
 type Props = {
@@ -46,16 +47,12 @@ export function BetHistoryList({ rows }: Props) {
 
   if (rows.length === 0) {
     return (
-      <div className="text-muted-foreground border-border/60 rounded-xl border border-dashed p-10 text-center text-sm">
-        <p className="text-foreground mb-1 font-medium">No bets yet</p>
-        <p>
-          Head back to{" "}
-          <Link href="/" className="text-foreground underline-offset-2 hover:underline">
-            the feed
-          </Link>{" "}
-          to place your first call.
-        </p>
-      </div>
+      <EmptyState
+        icon={Sparkles}
+        title="No bets yet"
+        description="Head back to the feed to place your first call."
+        cta={{ label: "Browse today's signals", href: "/" }}
+      />
     );
   }
 
