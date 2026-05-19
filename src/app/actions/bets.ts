@@ -70,6 +70,12 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
   });
 
   if (error) {
+    console.error("placeBet: rpc failed", {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     return { ok: false, error: mapBetError(error) };
   }
 
@@ -84,7 +90,85 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
   return { ok: true, prediction };
 }
 
-type PgError = { code?: string; message?: string };
+export type CancelBetResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Cancel an unresolved bet placed by the current user. Wraps `cancel_bet`
+ * Postgres RPC which atomically deletes the prediction, refunds the stake,
+ * decrements total_predictions, and appends a REFUND ledger row.
+ *
+ * Symmetric with placeBet: same `betWindowOpen` server-side gate so a tab
+ * left open past 1 PM can't sneak a cancel through. After lock, the only
+ * way out is the resolution job's WIN/LOSS/VOID call.
+ */
+export async function cancelBet(input: { predictionId: string }): Promise<CancelBetResult> {
+  if (
+    !input ||
+    typeof input.predictionId !== "string" ||
+    !UUID_RE.test(input.predictionId)
+  ) {
+    return { ok: false, error: "Invalid request" };
+  }
+
+  const schedule = getMarketSchedule();
+  if (!schedule.betWindowOpen) {
+    return {
+      ok: false,
+      error: "Bet window is locked — cancellation only allowed before 1 PM ET",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+  if (authErr || !user) {
+    return { ok: false, error: "Not authenticated" };
+  }
+
+  const { error } = await supabase.rpc("cancel_bet", {
+    p_prediction_id: input.predictionId,
+  });
+
+  if (error) {
+    // Surface in server logs so unmapped failures aren't a black box.
+    console.error("cancelBet: rpc failed", {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    return { ok: false, error: mapCancelError(error) };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/stock/[ticker]", "page");
+  revalidatePath("/bets");
+
+  return { ok: true };
+}
+
+type PgError = {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
+function mapCancelError(err: PgError): string {
+  const msg = err.message ?? "";
+  // Function-missing — most likely the cancel_bet migration hasn't been
+  // applied to prod yet. Tell the dev so they don't chase ghosts.
+  if (err.code === "PGRST202" || /could not find the function|function .* does not exist/i.test(msg)) {
+    return "Cancel isn't enabled on the server yet (migration pending)";
+  }
+  if (msg.includes("prediction_not_found")) return "That bet no longer exists";
+  if (msg.includes("prediction_already_resolved")) return "Already resolved — too late to cancel";
+  if (msg.includes("not_owner")) return "Not your bet";
+  if (msg.includes("not_authenticated")) return "Not authenticated";
+  return "Couldn't cancel bet — try again";
+}
 
 function mapBetError(err: PgError): string {
   if (err.code === "23505") {

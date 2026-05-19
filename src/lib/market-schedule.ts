@@ -348,6 +348,51 @@ export function formatRelative(target: Date, now: Date = new Date()): string {
   return past ? `${label} ago` : `in ${label}`;
 }
 
+/**
+ * Smart resolution copy for bet-placement toasts / chips.
+ *
+ *   - Same ET day as now → "Resolves today at 4:15 PM ET"
+ *   - Next ET day        → "Resolves tomorrow at 4:15 PM ET"
+ *   - Further out (Fri bet for Mon) → "Resolves Mon at 4:15 PM ET"
+ *
+ * Date comparison is done in ET, not local — a 9 PM PT bet (= 12 AM ET next
+ * day) is for *tomorrow's* trading day even though the user's wall clock
+ * still says today.
+ */
+export function formatResolutionCopy(resolutionAt: Date, now: Date = new Date()): string {
+  const nowParts = inET(now);
+  const resParts = inET(resolutionAt);
+  const sameDay =
+    nowParts.year === resParts.year &&
+    nowParts.month === resParts.month &&
+    nowParts.day === resParts.day;
+
+  // Tomorrow check: add 1 day to now in ET and compare.
+  const tomorrow = fromET(nowParts.year, nowParts.month, nowParts.day + 1, 0, 0);
+  const tomorrowParts = inET(tomorrow);
+  const isTomorrow =
+    !sameDay &&
+    tomorrowParts.year === resParts.year &&
+    tomorrowParts.month === resParts.month &&
+    tomorrowParts.day === resParts.day;
+
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: ET,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(resolutionAt);
+
+  if (sameDay) return `Resolves today at ${time} ET`;
+  if (isTomorrow) return `Resolves tomorrow at ${time} ET`;
+
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: ET,
+    weekday: "short",
+  }).format(resolutionAt);
+  return `Resolves ${day} at ${time} ET`;
+}
+
 /** Format a Date as a short ET wall-clock label ("Mon 8:00 PM ET"). */
 export function formatET(date: Date): string {
   return (

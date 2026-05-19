@@ -54,6 +54,24 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: bet cancellation RPC
+
+`cancel_bet` Postgres function (see [ADR 0009 — Cancellation](adr/0009-bet-placement-atomicity.md#cancellation-added-2026-05-19))
+ships in `supabase/migrations/20260519000004_cancel_bet_rpc.sql`. Until
+applied, the cancel button in BetSheet surfaces "Cancel isn't enabled
+on the server yet (migration pending)" — that's the error code for an
+unapplied migration, not a runtime bug.
+
+Apply via the same workflow as place_bet. After it runs, smoke-test:
+
+1. Place a 50-credit bet on any stock.
+2. Click the locked-in chip → BetSheet opens in manage mode.
+3. Click **Cancel bet** twice (first tap arms, second commits).
+4. Confirm: the `predictions` row is gone, `credit_transactions` has a
+   matching `type='REFUND'`, `amount=+50` row with `balance_after`
+   reflecting the refund, and `user_profiles.credit_balance` returned
+   to its pre-bet value.
+
 ### Pending migration: bet placement RPC
 
 The `place_bet` Postgres function (see [ADR 0009](adr/0009-bet-placement-atomicity.md))

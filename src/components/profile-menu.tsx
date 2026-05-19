@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { LogOut, Settings } from "lucide-react";
+import { History, LogOut, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +61,17 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
         </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={() => {
+            setOpen(false);
+            router.push("/bets");
+          }}
+          className="cursor-pointer"
+        >
+          <History className="h-4 w-4" />
+          <span>Your bets</span>
+        </DropdownMenuItem>
 
         <DropdownMenuItem
           onClick={() => {

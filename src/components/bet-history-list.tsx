@@ -1,0 +1,226 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowDown, ArrowUp, Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
+import type { BetHistoryRow } from "@/lib/bets";
+
+type Props = {
+  rows: BetHistoryRow[];
+};
+
+type Filter = "all" | "pending" | "resolved";
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "pending", label: "Pending" },
+  { key: "resolved", label: "Resolved" },
+];
+
+/**
+ * Bet history list — one row per prediction, newest first.
+ *
+ * Filter chips are client-side because we already loaded up to 200 rows at
+ * page-render time. Past that we'd want server-side pagination, but 200 is
+ * months of daily play for a casual user — fine for the MVP.
+ */
+export function BetHistoryList({ rows }: Props) {
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const visible = useMemo(() => {
+    if (filter === "pending") return rows.filter((r) => !r.resolved);
+    if (filter === "resolved") return rows.filter((r) => r.resolved);
+    return rows;
+  }, [rows, filter]);
+
+  const counts = useMemo(() => {
+    let pending = 0;
+    let resolved = 0;
+    for (const r of rows) {
+      if (r.resolved) resolved += 1;
+      else pending += 1;
+    }
+    return { all: rows.length, pending, resolved };
+  }, [rows]);
+
+  if (rows.length === 0) {
+    return (
+      <div className="text-muted-foreground border-border/60 rounded-xl border border-dashed p-10 text-center text-sm">
+        <p className="text-foreground mb-1 font-medium">No bets yet</p>
+        <p>
+          Head back to{" "}
+          <Link href="/" className="text-foreground underline-offset-2 hover:underline">
+            the feed
+          </Link>{" "}
+          to place your first call.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Filter chips */}
+      <div className="flex flex-wrap gap-1.5">
+        {FILTERS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+              filter === key
+                ? "border-foreground bg-foreground text-background"
+                : "border-border bg-card hover:border-foreground/40",
+            )}
+          >
+            {label}
+            <span
+              className={cn(
+                "ml-1.5 tabular-nums",
+                filter === key ? "text-background/70" : "text-muted-foreground",
+              )}
+            >
+              {counts[key]}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      {visible.length === 0 ? (
+        <p className="text-muted-foreground px-1 py-6 text-center text-xs">
+          No bets match this filter.
+        </p>
+      ) : (
+        <ul className="divide-border/40 border-border/60 bg-card/30 divide-y rounded-xl border">
+          {visible.map((row) => (
+            <BetRow key={row.id} row={row} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function BetRow({ row }: { row: BetHistoryRow }) {
+  const DirectionIcon = row.direction === "UP" ? ArrowUp : ArrowDown;
+  const directionTone =
+    row.direction === "UP" ? "text-emerald-600" : "text-rose-600";
+
+  const status = statusFor(row);
+  const net = row.payout !== null ? row.payout - row.credits_wagered : null;
+
+  return (
+    <li className="hover:bg-card/60 flex flex-col gap-2 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-4">
+      {/* Ticker + name */}
+      <Link
+        href={`/stock/${row.stock.ticker}`}
+        className="hover:text-foreground flex min-w-0 items-center gap-2 sm:w-40"
+      >
+        <span className="font-mono text-sm font-semibold">{row.stock.ticker}</span>
+        <span className="text-muted-foreground truncate text-xs">{row.stock.name}</span>
+      </Link>
+
+      {/* Direction + stake */}
+      <div className="flex flex-1 items-center gap-2">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 font-mono text-xs font-medium",
+            directionTone,
+          )}
+        >
+          <DirectionIcon className="h-3.5 w-3.5" aria-hidden />
+          {row.direction}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          · {row.credits_wagered} credits
+        </span>
+      </div>
+
+      {/* Status badge */}
+      <div className="flex items-center gap-3 sm:gap-4">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium tracking-wider uppercase",
+            status.className,
+          )}
+        >
+          {status.icon}
+          {status.label}
+        </span>
+
+        {/* Payout — only for resolved rows */}
+        {net !== null && (
+          <span
+            className={cn(
+              "font-mono text-xs tabular-nums",
+              net > 0
+                ? "text-emerald-600"
+                : net < 0
+                  ? "text-rose-600"
+                  : "text-muted-foreground",
+            )}
+          >
+            {net > 0 ? "+" : ""}
+            {net}
+          </span>
+        )}
+
+        {/* Date */}
+        <span className="text-muted-foreground ml-auto font-mono text-[11px] tabular-nums">
+          {formatTradingDate(row.prediction_date)}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function statusFor(row: BetHistoryRow): {
+  label: string;
+  className: string;
+  icon: React.ReactNode;
+} {
+  if (!row.resolved) {
+    return {
+      label: "Pending",
+      className: "border-amber-500/40 bg-amber-500/10 text-amber-600",
+      icon: <Clock className="h-2.5 w-2.5" aria-hidden />,
+    };
+  }
+  if (row.outcome === "WIN") {
+    return {
+      label: "Win",
+      className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600",
+      icon: null,
+    };
+  }
+  if (row.outcome === "LOSS") {
+    return {
+      label: "Loss",
+      className: "border-rose-500/40 bg-rose-500/10 text-rose-600",
+      icon: null,
+    };
+  }
+  // VOID — flat tape, stake refunded
+  return {
+    label: "Void",
+    className: "border-border bg-card text-muted-foreground",
+    icon: null,
+  };
+}
+
+/** Format "2026-05-19" as "May 19" — short, scannable, year-agnostic. */
+function formatTradingDate(iso: string): string {
+  // Parse as UTC to avoid local-tz date shift, then format. The date column is
+  // a calendar date (no tz), so we just want the calendar reading.
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}

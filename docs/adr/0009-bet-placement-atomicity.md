@@ -116,6 +116,50 @@ still scope to `auth.uid()`, never a caller-supplied user_id.
   This is the right place for that friction — it forces us to think about
   atomicity for every new write.
 
+## Cancellation (added 2026-05-19)
+
+Cancel-before-lock is the symmetric counterpart and follows the same
+pattern — a second RPC, `cancel_bet(prediction_id)`, that runs three
+writes in one transaction: delete the prediction, refund the balance,
+append a `REFUND` row to `credit_transactions`. Migration:
+`20260519000004_cancel_bet_rpc.sql`.
+
+### Race against resolution
+The interesting race is cancellation vs the 4:15 PM ET resolution job —
+both want to write to the same prediction row. We close it the same way
+place_bet closes the double-click race: `FOR UPDATE` lock on the
+prediction inside the cancel transaction, plus a `resolved=false` check
+*after* taking the lock. One of two things happens:
+- Cancel gets the lock first → deletes the row → resolution finds no
+  unresolved row and moves on.
+- Resolution gets the lock first → sets `resolved=true` → cancel's
+  post-lock check sees `resolved=true` and raises
+  `prediction_already_resolved`, which the server action maps to
+  "Already resolved — too late to cancel".
+
+There is no window where both operations succeed.
+
+### Hard delete on predictions, append on the ledger
+The predictions row is hard-deleted (no `cancelled_at` column). Rationale:
+- The unique `(user, stock, prediction_date)` constraint can stay simple
+  — re-betting on the same stock after cancellation just works, no
+  partial-index gymnastics required.
+- The audit trail lives in `credit_transactions`, not in `predictions`.
+  Both the `WAGER` (debit) and `REFUND` (credit) rows survive
+  cancellation with `reference_id` pointing at the now-deleted
+  prediction's UUID. A reader can reconstruct "this user placed a bet
+  and cancelled it" from the ledger alone.
+- The `predictions` table now means *live bets only*, which makes every
+  consumer of that table (home-feed lookup, resolution job, history
+  views) simpler — no need to filter out cancelled rows everywhere.
+
+### Symmetric window gate
+The server action re-checks `MarketSchedule.betWindowOpen` before
+calling the RPC. If you can place a bet, you can cancel; once the
+window locks, both operations refuse client-side and would refuse
+server-side too. This matches the user's mental model — the bet window
+is a single state, not two.
+
 ## Tradeoffs accepted
 
 - Schema-level logic in exchange for atomicity guarantees and concurrency

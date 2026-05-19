@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, CheckCircle2, Clock, Lock } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Clock, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BetSheet } from "@/components/bet-sheet";
 import { cn } from "@/lib/utils";
@@ -29,9 +29,9 @@ type Props = {
 
 /**
  * Three-state CTA for the bet flow:
- *   1. userBet present → locked-in chip (no further action this trading day)
- *   2. window open      → "Place bet" button that opens BetSheet
- *   3. window closed    → muted "Bet window opens in 4h" label
+ *   1. userBet present → locked-in chip (clickable to cancel while window open)
+ *   2. window open + no bet → "Place bet" button that opens BetSheet
+ *   3. window closed + no bet → muted "Bet window opens in 4h" label
  *
  * Centralized here so the StockCard footer and stock-detail section stay in
  * sync — same component, different `size`.
@@ -48,16 +48,33 @@ export function BetCta({
   size = "sm",
 }: Props) {
   const [open, setOpen] = useState(false);
+  const cancellable = !!userBet && betWindowOpen;
 
-  // State 1: already bet today.
+  // State 1: already bet today. Chip is clickable IFF the window is still open
+  // (so the user can cancel); after lock it's a passive status indicator.
   if (userBet) {
     return (
-      <LockedInChip
-        bet={userBet}
-        betWindowOpen={betWindowOpen}
-        resolutionAt={resolutionAt}
-        size={size}
-      />
+      <>
+        <LockedInChip
+          bet={userBet}
+          betWindowOpen={betWindowOpen}
+          resolutionAt={resolutionAt}
+          size={size}
+          onClick={cancellable ? () => setOpen(true) : undefined}
+        />
+        {cancellable && (
+          <BetSheet
+            open={open}
+            onOpenChange={setOpen}
+            stock={stock}
+            verdict={verdict}
+            userCredits={userCredits}
+            betWindowClosesAt={betWindowClosesAt}
+            resolutionAt={resolutionAt}
+            existingBet={userBet}
+          />
+        )}
+      </>
     );
   }
 
@@ -98,6 +115,7 @@ export function BetCta({
         verdict={verdict}
         userCredits={userCredits}
         betWindowClosesAt={betWindowClosesAt}
+        resolutionAt={resolutionAt}
       />
     </>
   );
@@ -108,11 +126,14 @@ function LockedInChip({
   betWindowOpen,
   resolutionAt,
   size,
+  onClick,
 }: {
   bet: Prediction;
   betWindowOpen: boolean;
   resolutionAt: Date;
   size: "sm" | "lg";
+  /** When provided, the chip renders as a button (cancellable). */
+  onClick?: () => void;
 }) {
   const Icon = bet.direction === "UP" ? ArrowUp : ArrowDown;
   const tone =
@@ -120,16 +141,27 @@ function LockedInChip({
       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600"
       : "border-rose-500/40 bg-rose-500/10 text-rose-600";
 
-  return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-        tone,
-        size === "lg" && "px-3 py-2",
+  const className = cn(
+    "inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-all",
+    tone,
+    size === "lg" && "px-3 py-2",
+    onClick &&
+      "cursor-pointer hover:brightness-110 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none",
+    bet.direction === "UP" && onClick && "focus-visible:ring-emerald-500",
+    bet.direction === "DOWN" && onClick && "focus-visible:ring-rose-500",
+  );
+
+  const tipText = onClick
+    ? "Click to manage or cancel"
+    : `Locked in at ${new Date(bet.locked_at).toLocaleString()}`;
+
+  const content = (
+    <>
+      {onClick ? (
+        <Pencil className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden />
+      ) : (
+        <CheckCircle2 className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden />
       )}
-      title={`Locked in at ${new Date(bet.locked_at).toLocaleString()}`}
-    >
-      <CheckCircle2 className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden />
       <Icon className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden />
       <div className="flex items-baseline gap-1.5 font-mono">
         <span className={cn("font-semibold", size === "lg" ? "text-sm" : "text-xs")}>
@@ -139,8 +171,22 @@ function LockedInChip({
       </div>
       <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px] font-normal">
         <Lock className="h-3 w-3" aria-hidden />
-        {betWindowOpen ? "Locked in" : `Resolves ${formatRelative(resolutionAt)}`}
+        {betWindowOpen ? "Cancel before 1 PM" : `Resolves ${formatRelative(resolutionAt)}`}
       </span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className} title={tipText}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={className} title={tipText}>
+      {content}
     </div>
   );
 }
