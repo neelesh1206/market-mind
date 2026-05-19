@@ -8,27 +8,36 @@ export const runtime = "edge";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 
-// Re-rendered when the pipeline produces new data; otherwise CDN-cached.
 export const revalidate = 300;
 
 type RouteParams = Promise<{ ticker: string }>;
 
 /**
- * Dynamic OG image for /stock/[ticker] — what Twitter / LinkedIn / iMessage
- * preview when someone shares the URL. Renders with `next/og`'s edge-runtime
- * `ImageResponse` (Satori under the hood, so we get JSX-style layout but only
- * a flexbox subset of CSS).
+ * Dynamic OG image for /stock/[ticker]. Layout:
  *
- * Visual identity matches the app: dark canvas, emerald MarketMind logo,
- * mono ticker, signal bars + verdict chip + track record. Same data the user
- * would see when they actually visit the page — the preview *is* the product.
+ *   [logo MarketMind]                         [track-record pill]
+ *
+ *   AAPL              ┌──────────────────────┐
+ *   Apple Inc.        │  ↑                   │
+ *   +1.24% today      │  UP                  │
+ *                     │  32% confidence      │
+ *                     └──────────────────────┘
+ *
+ *   Technical    ─────|████─                          -0.10
+ *   Sentiment    ─────|████──                         +0.28
+ *   Professional ─────|████████                       +0.69
+ *   Social       ─────|██████─                        +0.50
+ *
+ *   Multi-source signal intelligence              marketmind.app
+ *
+ * Rendered via next/og's edge `ImageResponse`. Satori (the engine under the
+ * hood) only supports a flexbox subset of CSS — every multi-child div needs
+ * explicit `display: flex`, and text interpolations need to be flattened to
+ * single strings (not [text, value, text] JSX children).
  */
 export async function GET(_req: Request, { params }: { params: RouteParams }) {
   const { ticker } = await params;
 
-  // Anon client — all relevant tables have public_read RLS. We bypass the
-  // cookie-aware createClient because OG generation runs at the edge without
-  // request context.
   const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
   });
@@ -44,12 +53,20 @@ export async function GET(_req: Request, { params }: { params: RouteParams }) {
 
   const { stock, insight, verdict } = detail;
 
-  const verdictTone =
+  // Verdict palette
+  const verdictPalette =
     verdict?.direction === "UP"
-      ? { color: "#10b981", bg: "rgba(16, 185, 129, 0.12)", border: "rgba(16, 185, 129, 0.4)" }
+      ? { color: "#34d399", bg: "rgba(16, 185, 129, 0.10)", border: "rgba(16, 185, 129, 0.45)", glow: "rgba(16, 185, 129, 0.35)" }
       : verdict?.direction === "DOWN"
-        ? { color: "#f43f5e", bg: "rgba(244, 63, 94, 0.12)", border: "rgba(244, 63, 94, 0.4)" }
-        : { color: "#a3a3a3", bg: "rgba(163, 163, 163, 0.10)", border: "rgba(163, 163, 163, 0.3)" };
+        ? { color: "#fb7185", bg: "rgba(244, 63, 94, 0.10)", border: "rgba(244, 63, 94, 0.45)", glow: "rgba(244, 63, 94, 0.30)" }
+        : { color: "#d4d4d4", bg: "rgba(163, 163, 163, 0.08)", border: "rgba(163, 163, 163, 0.30)", glow: "rgba(163, 163, 163, 0.20)" };
+
+  const directionGlyph =
+    verdict?.direction === "UP" ? "↑" : verdict?.direction === "DOWN" ? "↓" : "→";
+
+  const dayChange = insight?.day_change_pct ?? null;
+  const dayChangeTone =
+    dayChange === null ? "#737373" : dayChange >= 0 ? "#34d399" : "#fb7185";
 
   const buckets: { label: string; value: number | null }[] = [
     { label: "Technical", value: insight?.technical_score ?? null },
@@ -64,84 +81,213 @@ export async function GET(_req: Request, { params }: { params: RouteParams }) {
         style={{
           width: "100%",
           height: "100%",
-          background: "linear-gradient(135deg, #0a0a0a 0%, #111827 100%)",
+          background: "linear-gradient(135deg, #0a0a0a 0%, #0f172a 50%, #0a0a0a 100%)",
           color: "#fafafa",
-          padding: "60px 70px",
+          padding: "42px 64px 48px",
           display: "flex",
           flexDirection: "column",
           fontFamily: "system-ui, -apple-system, sans-serif",
+          position: "relative",
         }}
       >
-        {/* Header — logo + brand */}
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 10,
-              background: "linear-gradient(135deg, #10b981 0%, #047857 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 8px 24px rgba(16, 185, 129, 0.35)",
-            }}
-          >
-            {/* Chart-up mark */}
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M3 17L9 11L13 15L21 7"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M15 7H21V13"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+        {/* Subtle radial glow behind the verdict — tints the canvas toward
+            the call's color without dominating. */}
+        <div
+          style={{
+            position: "absolute",
+            right: -120,
+            top: 80,
+            width: 700,
+            height: 700,
+            borderRadius: 999,
+            background: `radial-gradient(circle, ${verdictPalette.glow} 0%, transparent 65%)`,
+            opacity: 0.6,
+            display: "flex",
+          }}
+        />
+
+        {/* Header row */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            zIndex: 1,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 10,
+                background: "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 8px 24px rgba(16, 185, 129, 0.35)",
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <path d="M3 17L9 11L13 15L21 7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M15 7H21V13" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.01em" }}>
+              MarketMind
+            </div>
           </div>
-          <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.01em" }}>MarketMind</div>
+
+          {trackRecord.total > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 14px",
+                borderRadius: 999,
+                border: "1px solid rgba(255, 255, 255, 0.10)",
+                background: "rgba(255, 255, 255, 0.04)",
+                fontSize: 16,
+              }}
+            >
+              <span style={{ color: "#a3a3a3" }}>30-day</span>
+              <span style={{ color: "#34d399", fontWeight: 700 }}>
+                {`${Math.round((trackRecord.accuracy ?? 0) * 100)}% accurate`}
+              </span>
+              <span style={{ color: "#737373" }}>
+                {`(${trackRecord.correct}/${trackRecord.total})`}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Ticker + name */}
-        <div style={{ marginTop: 48, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 110, fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1 }}>
-            {stock.ticker}
+        {/* Body — two columns */}
+        <div
+          style={{
+            marginTop: 28,
+            display: "flex",
+            gap: 36,
+            alignItems: "flex-start",
+            zIndex: 1,
+          }}
+        >
+          {/* Left column: ticker + company + day change */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+            <div
+              style={{
+                fontSize: 108,
+                fontWeight: 800,
+                letterSpacing: "-0.05em",
+                lineHeight: 0.9,
+              }}
+            >
+              {stock.ticker}
+            </div>
+            <div style={{ fontSize: 24, color: "#a3a3a3", letterSpacing: "-0.01em" }}>
+              {stock.name}
+            </div>
+            {dayChange !== null && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 6,
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${dayChange >= 0 ? "rgba(16, 185, 129, 0.3)" : "rgba(244, 63, 94, 0.3)"}`,
+                  background: dayChange >= 0 ? "rgba(16, 185, 129, 0.08)" : "rgba(244, 63, 94, 0.08)",
+                  alignSelf: "flex-start",
+                }}
+              >
+                <span style={{ fontSize: 18, color: dayChangeTone, fontWeight: 700 }}>
+                  {`${dayChange >= 0 ? "+" : ""}${dayChange.toFixed(2)}%`}
+                </span>
+                <span style={{ fontSize: 14, color: "#a3a3a3" }}>today</span>
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: 28, color: "#a3a3a3", letterSpacing: "-0.01em" }}>
-            {stock.name}
-          </div>
+
+          {/* Right column: BIG verdict card */}
+          {verdict && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                padding: "22px 28px",
+                borderRadius: 16,
+                border: `2px solid ${verdictPalette.border}`,
+                background: verdictPalette.bg,
+                color: verdictPalette.color,
+                minWidth: 300,
+                boxShadow: `0 12px 48px ${verdictPalette.glow}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 13,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "#a3a3a3",
+                }}
+              >
+                MarketMind&apos;s read
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  marginTop: 6,
+                }}
+              >
+                <div style={{ fontSize: 68, lineHeight: 1, fontWeight: 800 }}>
+                  {directionGlyph}
+                </div>
+                <div
+                  style={{
+                    fontSize: 60,
+                    fontWeight: 800,
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1,
+                  }}
+                >
+                  {verdict.direction}
+                </div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 18, color: "#d4d4d4" }}>
+                {`${Math.round(verdict.confidence * 100)}% confidence`}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Verdict chip — only rendered if we have one */}
-        {verdict && (
+        {/* Reasoning quote — the LLM's one-line "why" behind the verdict.
+            Trimmed to ~130 chars so it stays a one-liner at this width. */}
+        {verdict?.reasoning && (
           <div
             style={{
-              marginTop: 28,
-              alignSelf: "flex-start",
+              marginTop: 18,
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: 12,
-              padding: "10px 18px",
-              borderRadius: 10,
-              border: `1px solid ${verdictTone.border}`,
-              background: verdictTone.bg,
-              color: verdictTone.color,
+              paddingLeft: 14,
+              borderLeft: `3px solid ${verdictPalette.border}`,
+              zIndex: 1,
             }}
           >
-            <div style={{ fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              MarketMind&apos;s read
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>
-              {verdict.direction === "UP" ? "↑" : verdict.direction === "DOWN" ? "↓" : "→"}{" "}
-              {verdict.direction}
-            </div>
-            <div style={{ fontSize: 20, opacity: 0.8 }}>
-              · {Math.round(verdict.confidence * 100)}%
+            <div
+              style={{
+                fontSize: 18,
+                lineHeight: 1.3,
+                color: "#d4d4d4",
+                fontStyle: "italic",
+                letterSpacing: "-0.005em",
+                display: "flex",
+              }}
+            >
+              {truncate(verdict.reasoning, 130)}
             </div>
           </div>
         )}
@@ -149,10 +295,11 @@ export async function GET(_req: Request, { params }: { params: RouteParams }) {
         {/* Signal bars */}
         <div
           style={{
-            marginTop: 40,
+            marginTop: verdict?.reasoning ? 18 : 28,
             display: "flex",
             flexDirection: "column",
-            gap: 14,
+            gap: 10,
+            zIndex: 1,
           }}
         >
           {buckets.map((b) => (
@@ -160,34 +307,22 @@ export async function GET(_req: Request, { params }: { params: RouteParams }) {
           ))}
         </div>
 
-        {/* Footer — track record badge + URL */}
+        {/* Footer */}
         <div
           style={{
             marginTop: "auto",
+            paddingTop: 20,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 16,
-            paddingTop: 24,
             borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            fontSize: 17,
+            color: "#a3a3a3",
+            zIndex: 1,
           }}
         >
-          {trackRecord.total > 0 ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 18 }}>
-              <span style={{ color: "#a3a3a3" }}>30-day track record</span>
-              <span style={{ color: "#10b981", fontWeight: 600 }}>
-                {Math.round((trackRecord.accuracy ?? 0) * 100)}%
-              </span>
-              <span style={{ color: "#737373" }}>
-                ({trackRecord.correct}/{trackRecord.total})
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: 18, color: "#a3a3a3" }}>
-              Multi-source signal intelligence
-            </div>
-          )}
-          <div style={{ fontSize: 18, color: "#a3a3a3" }}>marketmind.app</div>
+          <div style={{ display: "flex" }}>Multi-source signal intelligence · 10+ sources</div>
+          <div style={{ display: "flex" }}>marketmind.app</div>
         </div>
       </div>
     ),
@@ -200,40 +335,59 @@ export async function GET(_req: Request, { params }: { params: RouteParams }) {
   );
 }
 
+/** Truncate at a word boundary if possible — avoids mid-word cuts in the OG. */
+function truncate(text: string, max: number): string {
+  const clean = text.trim();
+  if (clean.length <= max) return clean;
+  const slice = clean.slice(0, max - 1);
+  const lastSpace = slice.lastIndexOf(" ");
+  return `${slice.slice(0, lastSpace > max - 30 ? lastSpace : max - 1)}…`;
+}
+
 function SignalRow({ label, value }: { label: string; value: number | null }) {
-  // Width as % of half the bar (center origin → +1 fills right, -1 fills left).
-  // Satori doesn't support transforms reliably; we render two halves explicitly.
   const v = value ?? 0;
   const absPct = Math.min(Math.abs(v), 1) * 100;
   const positive = v > 0;
   const negative = v < 0;
-  const tone = positive ? "#10b981" : negative ? "#f43f5e" : "#525252";
+  const tone = positive ? "#34d399" : negative ? "#fb7185" : "#525252";
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-      <div style={{ width: 160, fontSize: 18, color: "#a3a3a3" }}>{label}</div>
+    <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+      <div
+        style={{
+          width: 170,
+          fontSize: 19,
+          color: "#d4d4d4",
+          letterSpacing: "0.02em",
+          display: "flex",
+        }}
+      >
+        {label}
+      </div>
       <div
         style={{
           flex: 1,
-          height: 10,
+          height: 14,
           borderRadius: 999,
-          background: "rgba(255, 255, 255, 0.06)",
+          background: "rgba(255, 255, 255, 0.05)",
           display: "flex",
           position: "relative",
         }}
       >
-        {/* Center line */}
+        {/* Center anchor — a small notch, more grounded than a thin line */}
         <div
           style={{
             position: "absolute",
             left: "50%",
-            top: -3,
-            bottom: -3,
-            width: 1,
-            background: "rgba(255, 255, 255, 0.18)",
+            top: -4,
+            bottom: -4,
+            width: 2,
+            marginLeft: -1,
+            background: "rgba(255, 255, 255, 0.20)",
+            borderRadius: 1,
+            display: "flex",
           }}
         />
-        {/* Filled portion — anchored at center */}
         {value !== null && (
           <div
             style={{
@@ -242,6 +396,8 @@ function SignalRow({ label, value }: { label: string; value: number | null }) {
               bottom: 0,
               borderRadius: 999,
               background: tone,
+              boxShadow: `0 0 12px ${tone}66`,
+              display: "flex",
               ...(positive
                 ? { left: "50%", width: `${absPct / 2}%` }
                 : { right: "50%", width: `${absPct / 2}%` }),
@@ -251,11 +407,13 @@ function SignalRow({ label, value }: { label: string; value: number | null }) {
       </div>
       <div
         style={{
-          width: 72,
+          width: 96,
           textAlign: "right",
-          fontSize: 18,
-          fontWeight: 600,
+          fontSize: 22,
+          fontWeight: 700,
           color: value === null ? "#525252" : tone,
+          display: "flex",
+          justifyContent: "flex-end",
         }}
       >
         {value === null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`}
