@@ -31,8 +31,17 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+
+# Defensive PIT (point-in-time) bounds applied to every NewsArticle before
+# it reaches FinBERT, the sources_agree counter, or the displayed top-3.
+# Future-dated articles signal a publisher timestamp bug and would
+# constitute look-ahead if trusted; very-old articles already get zero
+# recency weight in aggregate_sentiment but still leak into top_articles
+# (sorted by |sentiment|, not recency) and into cross_source_agreement.
+PIT_MAX_AGE_DAYS = 7
+PIT_FUTURE_TOLERANCE = timedelta(minutes=15)  # clock skew, not actual lookahead
 
 from .config import load_config
 from .fetchers.apewisdom import ApeWisdomFetcher
@@ -304,6 +313,7 @@ async def _process_stock(
     # Unpack typed results (None if missing/failed).
     price: PriceSnapshot | None = _data(results.get("price"))
     articles: list[NewsArticle] = _data(results.get("news")) or []
+    articles = _apply_pit_filter(articles, ticker=stock.ticker, log=log)
     analyst: AnalystSnapshot | None = _data(results.get("analyst"))
     earnings: EarningsSnapshot | None = _data(results.get("earnings"))
     insider: InsiderSnapshot | None = _data(results.get("insider"))
@@ -489,6 +499,61 @@ def _data(result: FetchResult[Any] | None) -> Any:
     if result is None or result.status != "success":
         return None
     return result.data
+
+
+def _apply_pit_filter(
+    articles: list[NewsArticle], *, ticker: str, log: logging.Logger
+) -> list[NewsArticle]:
+    """Drop articles that fail point-in-time discipline.
+
+    Two cases:
+      - `published_at` is in the future beyond clock-skew tolerance — almost
+        always a publisher timestamp bug; trusting it would be look-ahead.
+      - `published_at` is older than PIT_MAX_AGE_DAYS — stale enough that
+        any sentiment it carries is unrelated to the next session's move.
+        These already get 0 recency weight in the aggregator, but they
+        still leak into top-3 display (sorted by |sentiment|) and into
+        sources_agree counts. Drop them at the source instead.
+
+    Articles with `published_at = None` are kept (we can't classify them).
+    """
+    if not articles:
+        return articles
+
+    now = datetime.now(timezone.utc)
+    cutoff_past = now - timedelta(days=PIT_MAX_AGE_DAYS)
+    cutoff_future = now + PIT_FUTURE_TOLERANCE
+
+    kept: list[NewsArticle] = []
+    dropped_future = 0
+    dropped_stale = 0
+
+    for a in articles:
+        if a.published_at is None:
+            kept.append(a)
+            continue
+        published = (
+            a.published_at
+            if a.published_at.tzinfo
+            else a.published_at.replace(tzinfo=timezone.utc)
+        )
+        if published > cutoff_future:
+            dropped_future += 1
+            continue
+        if published < cutoff_past:
+            dropped_stale += 1
+            continue
+        kept.append(a)
+
+    if dropped_future or dropped_stale:
+        log.info(
+            "pit_filter ticker=%s kept=%s dropped_future=%s dropped_stale=%s",
+            ticker,
+            len(kept),
+            dropped_future,
+            dropped_stale,
+        )
+    return kept
 
 
 def _scores_repr(buckets: Any) -> str:

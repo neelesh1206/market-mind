@@ -172,7 +172,18 @@ async def _resolve_marketmind(
     dry_run: bool,
     log: logging.Logger,
 ) -> dict[str, int]:
-    """Resolve MarketMind's own verdicts against the day's actual close."""
+    """Resolve MarketMind's own verdicts against the prediction window.
+
+    The verdict is frozen at the 8 PM ET T-1 pipeline run, so the natural
+    scoring window is T-1 close → T close (prev_close → close). Earlier
+    code scored open → close, which discarded the overnight gap — the
+    window where most pre-open news is priced — and effectively measured
+    a different prediction than the one the model made.
+
+    User predictions are still scored open → close (see ADR 0008): for
+    user bets the window must match the bet-locking time, not the verdict
+    time, because users can bet up to 1 PM ET on the trading day.
+    """
     res = (
         supabase.table("marketmind_predictions")
         .select("id, stock_id, direction, stocks(ticker)")
@@ -201,8 +212,8 @@ async def _resolve_marketmind(
 
     for ticker, group in by_ticker.items():
         try:
-            open_price, close_price = await asyncio.to_thread(
-                _fetch_day_bar, ticker, target_date
+            prev_close, open_price, close_price = await asyncio.to_thread(
+                _fetch_mm_prices, ticker, target_date
             )
         except Exception as e:  # noqa: BLE001
             log.exception("mm_price_fetch_failed ticker=%s err=%s", ticker, e)
@@ -212,16 +223,21 @@ async def _resolve_marketmind(
                 stats["errors"] += 1
             continue
 
-        if open_price is None or close_price is None:
-            log.warning("mm_missing_prices ticker=%s", ticker)
+        if prev_close is None or close_price is None:
+            log.warning(
+                "mm_missing_prices ticker=%s prev_close=%s close=%s",
+                ticker, prev_close, close_price,
+            )
             for r in group:
                 _commit_mm_void(supabase, r, log, dry_run=dry_run)
                 stats["voids"] += 1
             continue
 
         for r in group:
-            outcome = _outcome_only(
-                direction=r["direction"], open_price=open_price, close_price=close_price
+            outcome = _outcome_against_reference(
+                direction=r["direction"],
+                reference_price=prev_close,
+                close_price=close_price,
             )
             if outcome == "WIN":
                 stats["wins"] += 1
@@ -232,10 +248,21 @@ async def _resolve_marketmind(
 
             if dry_run:
                 log.info(
-                    "dry_run_mm_resolve id=%s ticker=%s dir=%s open=%.2f close=%.2f outcome=%s",
-                    r["id"], ticker, r["direction"], open_price, close_price, outcome,
+                    "dry_run_mm_resolve id=%s ticker=%s dir=%s prev_close=%.2f open=%s close=%.2f outcome=%s",
+                    r["id"], ticker, r["direction"], prev_close,
+                    f"{open_price:.2f}" if open_price is not None else "n/a",
+                    close_price, outcome,
                 )
             else:
+                # `open_price` column on marketmind_predictions stores the
+                # actual session open (display fidelity); the *outcome* was
+                # computed against prev_close which we surface in the log
+                # below. A future schema migration can add a dedicated
+                # `reference_price` column for full audit.
+                log.info(
+                    "mm_resolve_scored id=%s ticker=%s prev_close=%.2f close=%.2f outcome=%s",
+                    r["id"], ticker, prev_close, close_price, outcome,
+                )
                 _commit_mm_resolution(
                     supabase=supabase,
                     prediction_id=r["id"],
@@ -248,11 +275,17 @@ async def _resolve_marketmind(
     return stats
 
 
-def _outcome_only(*, direction: str, open_price: float, close_price: float) -> str:
-    """Like _evaluate but without payout logic — for the marketmind table."""
-    if open_price == close_price:
+def _outcome_against_reference(
+    *, direction: str, reference_price: float, close_price: float
+) -> str:
+    """Score a directional verdict against (reference_price → close_price).
+
+    For MarketMind verdicts the reference is the previous session's close;
+    for user predictions (a separate code path) it's the open.
+    """
+    if reference_price == close_price:
         return "VOID"
-    moved_up = close_price > open_price
+    moved_up = close_price > reference_price
     won = (direction == "UP" and moved_up) or (direction == "DOWN" and not moved_up)
     return "WIN" if won else "LOSS"
 
@@ -320,6 +353,61 @@ def _fetch_day_bar(ticker: str, target_date: str) -> tuple[float | None, float |
 
     row = df.iloc[0]
     return (float(row["Open"]), float(row["Close"]))
+
+
+def _fetch_mm_prices(
+    ticker: str, target_date: str
+) -> tuple[float | None, float | None, float | None]:
+    """Returns (prev_close, open, close) for the target trading day.
+
+    `prev_close` is the close of the most recent trading day STRICTLY before
+    `target_date`. We grab a 10-calendar-day window so a long weekend or a
+    market holiday (up to 3 closed days) still leaves us with a usable
+    prior bar; yfinance only returns trading days, so we can rely on the
+    last-two-rows pattern.
+    """
+    try:
+        from curl_cffi import requests as cffi_requests
+
+        session = cffi_requests.Session(impersonate="chrome")
+    except ImportError:
+        session = None
+
+    start = (
+        datetime.strptime(target_date, "%Y-%m-%d").date() - timedelta(days=10)
+    ).isoformat()
+
+    df: pd.DataFrame = yf.download(
+        ticker,
+        start=start,
+        end=_next_day(target_date),
+        interval="1d",
+        progress=False,
+        auto_adjust=False,
+        threads=False,
+        session=session,
+    )
+
+    if df.empty:
+        return (None, None, None)
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.droplevel(level=1, axis=1)
+
+    # Confirm the last bar is actually `target_date` — guards against
+    # market holidays where yfinance returns the prior day as the latest.
+    last_idx = df.index[-1].date()
+    target = datetime.strptime(target_date, "%Y-%m-%d").date()
+    if last_idx != target:
+        return (None, None, None)
+
+    if len(df) < 2:
+        # Insufficient history for a prev_close — can't score.
+        return (None, float(df.iloc[-1]["Open"]), float(df.iloc[-1]["Close"]))
+
+    prev = df.iloc[-2]
+    today = df.iloc[-1]
+    return (float(prev["Close"]), float(today["Open"]), float(today["Close"]))
 
 
 def _next_day(iso_date: str) -> str:

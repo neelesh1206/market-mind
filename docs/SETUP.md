@@ -89,6 +89,7 @@ NEXT_PUBLIC_POSTHOG_KEY=
 NEXT_PUBLIC_SENTRY_DSN=
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
+MASSIVE_API_KEY=                # required for the stock detail sparkline (server-side only)
 ```
 
 ### 4. Run dev server

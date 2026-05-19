@@ -41,10 +41,6 @@ class Verdict:
     weights_version: str
 
 
-def _coerce(score: float | None) -> float:
-    return 0.0 if score is None else float(score)
-
-
 def compute_verdict(
     *,
     technical: float | None,
@@ -54,15 +50,34 @@ def compute_verdict(
 ) -> Verdict:
     """
     Combine bucket scores into a single weighted verdict.
-    None scores are treated as 0 — they contribute neither way.
+
+    Missing buckets (None) are EXCLUDED from the sum; the remaining weights
+    are renormalized so present buckets keep their relative importance. The
+    earlier implementation coerced None to 0, which silently imposed a
+    bearish-ish drag whenever a positive bucket lacked corroborating data
+    (e.g. a +0.4 technical with no professional read got diluted to
+    0.4 * 0.30 = 0.12 instead of being treated as the sole available
+    signal). All-missing → NEUTRAL with confidence 0.
     """
-    scores = {
-        "technical": _coerce(technical),
-        "sentiment": _coerce(sentiment),
-        "professional": _coerce(professional),
-        "social": _coerce(social),
+    raw = {
+        "technical": technical,
+        "sentiment": sentiment,
+        "professional": professional,
+        "social": social,
     }
-    combined = sum(scores[k] * WEIGHTS_V1[k] for k in WEIGHTS_V1)
+    present = {k: float(v) for k, v in raw.items() if v is not None}
+
+    if not present:
+        return Verdict(
+            direction="NEUTRAL",
+            confidence=0.0,
+            reasoning=None,
+            bucket_scores=raw,
+            weights_version=WEIGHTS_VERSION,
+        )
+
+    total_weight = sum(WEIGHTS_V1[k] for k in present)
+    combined = sum(present[k] * WEIGHTS_V1[k] for k in present) / total_weight
 
     if combined > DIRECTION_THRESHOLD:
         direction: Direction = "UP"
@@ -77,12 +92,7 @@ def compute_verdict(
         direction=direction,
         confidence=round(confidence, 3),
         reasoning=None,  # filled below by the reasoning generator
-        bucket_scores={
-            "technical": technical,
-            "sentiment": sentiment,
-            "professional": professional,
-            "social": social,
-        },
+        bucket_scores=raw,
         weights_version=WEIGHTS_VERSION,
     )
 

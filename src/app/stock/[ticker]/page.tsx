@@ -14,8 +14,10 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
 import { fetchBetsForTradingDay } from "@/lib/bets";
+import { fetchDailyBars } from "@/lib/price-history";
 import { getMarketSchedule } from "@/lib/market-schedule";
 import { BetCta } from "@/components/bet-cta";
+import { StockSparkline } from "@/components/stock-sparkline";
 import { cn } from "@/lib/utils";
 
 type Params = Promise<{ ticker: string }>;
@@ -65,7 +67,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const email = (claims.claims.email ?? userId) as string;
 
   const schedule = getMarketSchedule();
-  const [detail, watchlist, profileRes, betsByStockId] = await Promise.all([
+  const [detail, watchlist, profileRes, betsByStockId, priceBars] = await Promise.all([
     fetchStockDetail(supabase, ticker),
     fetchUserWatchlist(supabase, userId),
     supabase
@@ -74,6 +76,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
       .eq("id", userId)
       .maybeSingle(),
     fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
+    fetchDailyBars(ticker, 30),
   ]);
 
   if (!detail) {
@@ -193,6 +196,37 @@ export default async function StockDetailPage({ params }: { params: Params }) {
               </a>{" "}
               with this ticker (or limit ≥ {stock.ticker.length} stocks) to populate.
             </p>
+          </section>
+        )}
+
+        {/* 30-day price sparkline — between header and verdict so the chart
+            grounds the rest of the page before we dive into signals. Renders
+            an empty-state line when Massive key is missing or fetch failed. */}
+        {priceBars.length >= 2 && (
+          <section className="border-border/60 bg-card/40 space-y-3 rounded-xl border p-5">
+            <header className="flex items-baseline justify-between gap-3">
+              <div>
+                <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+                  30-day price
+                </p>
+                <p className="font-mono text-lg font-semibold">
+                  ${priceBars[priceBars.length - 1]!.close.toFixed(2)}
+                </p>
+              </div>
+              {(() => {
+                const first = priceBars[0]!.close;
+                const last = priceBars[priceBars.length - 1]!.close;
+                const pct = ((last - first) / first) * 100;
+                const tone =
+                  pct > 0 ? "text-emerald-500" : pct < 0 ? "text-rose-500" : "text-muted-foreground";
+                return (
+                  <p className={cn("font-mono text-sm font-semibold tabular-nums", tone)}>
+                    {`${pct >= 0 ? "+" : ""}${pct.toFixed(2)}% · ${priceBars.length}d`}
+                  </p>
+                );
+              })()}
+            </header>
+            <StockSparkline bars={priceBars} />
           </section>
         )}
 
