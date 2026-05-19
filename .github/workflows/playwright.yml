@@ -78,16 +78,27 @@ jobs:
 
       - name: Choose target URL
         id: target
+        # Resolution priority:
+        #   1. Manual override (workflow_dispatch input) — always wins.
+        #   2. On PR: the Vercel preview URL from the deployment-status webhook.
+        #      Preview URLs (under *.vercel.app) are gated by Vercel
+        #      Deployment Protection by default; on PR events we WANT this
+        #      because that's the new code being tested.
+        #   3. On push to main: ALWAYS the public custom domain. The
+        #      vercel.outputs.url here would be the production deployment's
+        #      *.vercel.app URL, which is ALSO under Deployment Protection
+        #      (returns 401 to unauthenticated requests) — using it instead
+        #      of the custom domain breaks all our public tests.
         run: |
           if [ -n "${{ inputs.target_url }}" ]; then
             echo "url=${{ inputs.target_url }}" >> $GITHUB_OUTPUT
             echo "Using workflow input URL"
-          elif [ -n "${{ steps.vercel.outputs.url }}" ]; then
+          elif [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.vercel.outputs.url }}" ]; then
             echo "url=${{ steps.vercel.outputs.url }}" >> $GITHUB_OUTPUT
-            echo "Using Vercel-reported URL: ${{ steps.vercel.outputs.url }}"
+            echo "PR — using Vercel preview URL: ${{ steps.vercel.outputs.url }}"
           else
             echo "url=https://marketmind.neeleshkakaraparthi.dev" >> $GITHUB_OUTPUT
-            echo "Falling back to production URL"
+            echo "Push or fallback — using public custom domain"
           fi
 
       - name: Verify deploy actually serves the new build
