@@ -148,20 +148,27 @@ function BetRow({ row, todayEt }: { row: BetHistoryRow; todayEt: string }) {
         <span className="text-muted-foreground truncate text-xs">{row.stock.name}</span>
       </Link>
 
-      {/* Direction + stake */}
-      <div className="flex flex-1 items-center gap-2">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 font-mono text-xs font-medium",
-            directionTone,
-          )}
-        >
-          <DirectionIcon className="h-3.5 w-3.5" aria-hidden />
-          {row.direction}
-        </span>
-        <span className="text-muted-foreground text-xs">
-          · {row.credits_wagered} credits
-        </span>
+      {/* Direction + stake + price action (when resolved) */}
+      <div className="flex flex-1 flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 font-mono text-xs font-medium",
+              directionTone,
+            )}
+          >
+            <DirectionIcon className="h-3.5 w-3.5" aria-hidden />
+            {row.direction}
+          </span>
+          <span className="text-muted-foreground text-xs">· {row.credits_wagered} credits</span>
+        </div>
+        {row.resolved && row.open_price !== null && row.close_price !== null && (
+          <PriceActionLine
+            openPrice={row.open_price}
+            closePrice={row.close_price}
+            outcome={row.outcome}
+          />
+        )}
       </div>
 
       {/* Status badge */}
@@ -250,6 +257,42 @@ function statusFor(
 }
 
 /** Format "2026-05-19" as "May 19" — short, scannable, year-agnostic. */
+function PriceActionLine({
+  openPrice,
+  closePrice,
+  outcome,
+}: {
+  openPrice: number;
+  closePrice: number;
+  outcome: BetHistoryRow["outcome"];
+}) {
+  const delta = closePrice - openPrice;
+  const pct = openPrice > 0 ? (delta / openPrice) * 100 : 0;
+  // Color the line by direction of price movement, not outcome — a +1% move
+  // is green whether the user bet UP and won or bet DOWN and lost.
+  const tone =
+    delta > 0
+      ? "text-emerald-500"
+      : delta < 0
+        ? "text-rose-500"
+        : "text-muted-foreground";
+
+  return (
+    <div className="text-muted-foreground flex items-center gap-1.5 font-mono text-[11px]">
+      <span>open ${openPrice.toFixed(2)}</span>
+      <span className="opacity-60">→</span>
+      <span>close ${closePrice.toFixed(2)}</span>
+      <span className={cn("tabular-nums", tone)}>
+        {pct >= 0 ? "+" : ""}
+        {pct.toFixed(2)}%
+      </span>
+      {outcome === "VOID" && (
+        <span className="text-muted-foreground opacity-70">· flat tape</span>
+      )}
+    </div>
+  );
+}
+
 function formatTradingDate(iso: string): string {
   // Parse as UTC to avoid local-tz date shift, then format. The date column is
   // a calendar date (no tz), so we just want the calendar reading.

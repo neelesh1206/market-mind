@@ -54,6 +54,28 @@ gh workflow run fetch-insights.yml -f date=2026-05-18
 python resolve_predictions.py --date 2026-05-18
 ```
 
+### Pending migration: price_at_placement on predictions
+
+`supabase/migrations/20260519000009_price_at_placement.sql` adds a
+nullable `price_at_placement numeric(10,2)` column and extends the
+`place_bet` RPC to accept it. Until applied, the new
+`p_price_at_placement` parameter will cause the RPC call to fail with
+a function-signature mismatch.
+
+Apply via the standard workflow. Smoke-test:
+
+1. Place a bet on any stock with the dev server running.
+2. In SQL editor: `select id, ticker, price_at_placement from
+   predictions p join stocks s on s.id = p.stock_id order by
+   p.created_at desc limit 1;` — value should be non-null (matching
+   ~last trade).
+3. If Massive is throttling or your `MASSIVE_API_KEY` is unset, the
+   value will be NULL — that's expected, the bet still ships and
+   resolution is unaffected.
+4. After resolution runs, open the reveal modal on /. The card body
+   should now show "Your entry · $X" as a fourth row above the
+   open/close prices.
+
 ### Pending migration: badges v1
 
 `supabase/migrations/20260519000007_badges.sql` extends `place_bet` to

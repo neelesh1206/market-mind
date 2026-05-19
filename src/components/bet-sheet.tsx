@@ -149,7 +149,12 @@ function PlaceBody({
   function handleSubmit() {
     setError(null);
     startTransition(async () => {
-      const result = await placeBet({ stockId: stock.id, direction, credits });
+      const result = await placeBet({
+        stockId: stock.id,
+        ticker: stock.ticker,
+        direction,
+        credits,
+      });
       if (!result.ok) {
         setError(result.error);
         haptic("warning");

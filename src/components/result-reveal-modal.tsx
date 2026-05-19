@@ -277,6 +277,12 @@ function OutcomeBody({ bet }: { bet: BetHistoryRow }) {
           Payout: {bet.payout} credits (1.8× stake)
         </div>
         <div className="mt-6 space-y-1 text-sm">
+          {bet.price_at_placement !== null && (
+            <Row
+              label="Your entry"
+              value={`$${bet.price_at_placement.toFixed(2)}`}
+            />
+          )}
           <Row label={`${bet.stock.ticker} open`} value={`$${bet.open_price?.toFixed(2) ?? "—"}`} />
           <Row label={`${bet.stock.ticker} close`} value={`$${bet.close_price?.toFixed(2) ?? "—"}`} />
           <Row
@@ -297,6 +303,12 @@ function OutcomeBody({ bet }: { bet: BetHistoryRow }) {
         </div>
         <div className="text-muted-foreground mt-1 text-sm">Stake forfeited</div>
         <div className="mt-6 space-y-1 text-sm">
+          {bet.price_at_placement !== null && (
+            <Row
+              label="Your entry"
+              value={`$${bet.price_at_placement.toFixed(2)}`}
+            />
+          )}
           <Row label={`${bet.stock.ticker} open`} value={`$${bet.open_price?.toFixed(2) ?? "—"}`} />
           <Row label={`${bet.stock.ticker} close`} value={`$${bet.close_price?.toFixed(2) ?? "—"}`} />
           <Row

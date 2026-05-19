@@ -31,6 +31,12 @@ export type Prediction = {
   outcome: "WIN" | "LOSS" | "VOID" | null;
   open_price: number | null;
   close_price: number | null;
+  /**
+   * Live price at the moment of placement (informational only — resolution
+   * still uses open_price → close_price per ADR 0008). NULL when the live-
+   * price fetch failed at placement time.
+   */
+  price_at_placement: number | null;
   payout: number | null;
   resolved_at: string | null;
   created_at: string;
@@ -52,7 +58,7 @@ export async function fetchBetsForTradingDay(
   const { data, error } = await client
     .from("predictions")
     .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, payout, resolved_at, created_at",
+      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at",
     )
     .eq("user_id", userId)
     .eq("prediction_date", tradingDayLabel);
@@ -88,7 +94,7 @@ export async function fetchUnrevealedResolved(
   const { data, error } = await client
     .from("predictions")
     .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, payout, resolved_at, created_at, stocks(ticker, name, sector)",
+      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at, stocks(ticker, name, sector)",
     )
     .eq("user_id", userId)
     .eq("resolved", true)
@@ -131,7 +137,7 @@ export async function fetchUserBetHistory(
   let query = client
     .from("predictions")
     .select(
-      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, payout, resolved_at, created_at, stocks(ticker, name, sector)",
+      "id, user_id, stock_id, prediction_date, direction, credits_wagered, locked_at, resolved, outcome, open_price, close_price, price_at_placement, payout, resolved_at, created_at, stocks(ticker, name, sector)",
     )
     .eq("user_id", userId)
     .order("prediction_date", { ascending: false })

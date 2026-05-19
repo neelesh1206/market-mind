@@ -3,11 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getMarketSchedule } from "@/lib/market-schedule";
+import { fetchLivePrice } from "@/lib/price-history";
 import { rateLimit } from "@/lib/rate-limit";
 import type { Prediction } from "@/lib/bets";
 
 export type PlaceBetInput = {
   stockId: string;
+  /** Ticker symbol — used to fetch the live price at placement (informational). */
+  ticker: string;
   direction: "UP" | "DOWN";
   credits: number;
 };
@@ -32,6 +35,9 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
   }
   if (typeof input.stockId !== "string" || !UUID_RE.test(input.stockId)) {
     return { ok: false, error: "Invalid stock" };
+  }
+  if (typeof input.ticker !== "string" || !/^[A-Z]{1,8}$/.test(input.ticker)) {
+    return { ok: false, error: "Invalid ticker" };
   }
   if (input.direction !== "UP" && input.direction !== "DOWN") {
     return { ok: false, error: "Pick a direction" };
@@ -73,11 +79,16 @@ export async function placeBet(input: PlaceBetInput): Promise<PlaceBetResult> {
     };
   }
 
+  // Fire-and-forget price fetch in parallel — capped at 1.5s by the helper.
+  // null on any failure; the RPC accepts NULL for p_price_at_placement.
+  const priceAtPlacement = await fetchLivePrice(input.ticker);
+
   const { data, error } = await supabase.rpc("place_bet", {
     p_stock_id: input.stockId,
     p_direction: input.direction,
     p_credits: input.credits,
     p_prediction_date: schedule.tradingDayLabel,
+    p_price_at_placement: priceAtPlacement,
   });
 
   if (error) {
