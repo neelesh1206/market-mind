@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ExternalLink, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AnalystBar } from "@/components/analyst-bar";
 import { SignalBar } from "@/components/signal-bar";
+import { SignalStrip } from "@/components/signal-strip";
+import { StrongSignalBadge } from "@/components/strong-signal-badge";
 import { cn } from "@/lib/utils";
 import type { StockCardData } from "@/types/insight";
 
@@ -31,12 +34,20 @@ export function StockCard({ data }: Props) {
       {/* Header: ticker + name + price */}
       <header className="border-border/40 border-b px-5 py-4">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-baseline gap-2">
-              <h2 className="font-mono text-lg font-semibold tracking-tight">{stock.ticker}</h2>
-              <span className="text-muted-foreground truncate text-sm">{stock.name}</span>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h2 className="font-mono text-xl font-semibold tracking-tight">{stock.ticker}</h2>
+              <StrongSignalBadge
+                scores={[
+                  insight?.technical_score ?? null,
+                  insight?.sentiment_score ?? null,
+                  insight?.professional_score ?? null,
+                  insight?.social_score ?? null,
+                ]}
+              />
             </div>
-            <p className="text-muted-foreground mt-0.5 text-[11px] tracking-wider uppercase">
+            <p className="text-muted-foreground truncate text-sm">{stock.name}</p>
+            <p className="text-muted-foreground/80 text-[10px] tracking-wider uppercase">
               {stock.sector}
               {stock.sub_sector && (
                 <>
@@ -47,11 +58,21 @@ export function StockCard({ data }: Props) {
             </p>
           </div>
 
-          <div className="shrink-0 text-right">
-            <p className="font-mono text-base tabular-nums">
+          <div className="shrink-0 space-y-1 text-right">
+            <p className="font-mono text-xl font-semibold tabular-nums">
               {insight?.prev_close != null ? `$${insight.prev_close.toFixed(2)}` : "—"}
             </p>
-            <PriceChange pct={insight?.week_change_pct} suffix="wk" />
+            <PriceChip pct={insight?.week_change_pct} suffix="wk" />
+            {insight && (
+              <div className="flex justify-end pt-1">
+                <SignalStrip
+                  technical={insight.technical_score}
+                  sentiment={insight.sentiment_score}
+                  professional={insight.professional_score}
+                  social={insight.social_score}
+                />
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -83,6 +104,18 @@ export function StockCard({ data }: Props) {
           detail={socialDetail(insight)}
         />
       </section>
+
+      {/* Analyst rating bar — only when we have data */}
+      {insight && (insight.analyst_buy || insight.analyst_hold || insight.analyst_sell) && (
+        <section className="border-border/40 border-t px-5 py-3">
+          <AnalystBar
+            buy={insight.analyst_buy}
+            hold={insight.analyst_hold}
+            sell={insight.analyst_sell}
+            compact
+          />
+        </section>
+      )}
 
       {/* Top article with TL;DR + influence */}
       {topArticle && (topArticle.tldr || topArticle.signal_influence) && (
@@ -172,7 +205,7 @@ function BetButton({ direction, Icon }: { direction: "UP" | "DOWN"; Icon: Lucide
   );
 }
 
-function PriceChange({ pct, suffix }: { pct: number | null | undefined; suffix: string }) {
+function PriceChip({ pct, suffix }: { pct: number | null | undefined; suffix: string }) {
   if (pct == null) {
     return <span className="text-muted-foreground text-xs">—</span>;
   }
@@ -181,12 +214,20 @@ function PriceChange({ pct, suffix }: { pct: number | null | undefined; suffix: 
   return (
     <span
       className={cn(
-        "font-mono text-xs tabular-nums",
-        flat ? "text-muted-foreground" : up ? "text-emerald-500" : "text-red-500",
+        "inline-flex items-baseline gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums",
+        flat
+          ? "text-muted-foreground bg-muted"
+          : up
+            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            : "bg-red-500/10 text-red-600 dark:text-red-400",
       )}
     >
-      {up && !flat ? "▲" : !flat ? "▼" : ""} {up ? "+" : ""}
-      {pct.toFixed(2)}% {suffix}
+      <span aria-hidden>{up && !flat ? "▲" : !flat ? "▼" : "·"}</span>
+      <span>
+        {up ? "+" : ""}
+        {pct.toFixed(2)}%
+      </span>
+      <span className="opacity-60">{suffix}</span>
     </span>
   );
 }

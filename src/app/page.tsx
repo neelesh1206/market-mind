@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
@@ -167,8 +168,11 @@ export default async function Home() {
       </main>
 
       <footer className="border-border/60 border-t">
-        <div className="text-muted-foreground/70 mx-auto w-full max-w-5xl px-6 py-4 text-xs">
-          For educational purposes only. Not investment advice.
+        <div className="text-muted-foreground/70 mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-6 py-4 text-xs">
+          <span>For educational purposes only. Not investment advice.</span>
+          <Link href="/about" className="hover:text-foreground underline-offset-2 hover:underline">
+            How signals are computed →
+          </Link>
         </div>
       </footer>
     </div>

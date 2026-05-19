@@ -6,6 +6,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileMenu } from "@/components/profile-menu";
 import { SignalDetail } from "@/components/signal-detail";
 import { ArticleDetail } from "@/components/article-detail";
+import { AnalystBar } from "@/components/analyst-bar";
+import { SignalStrip } from "@/components/signal-strip";
+import { StrongSignalBadge } from "@/components/strong-signal-badge";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
@@ -79,11 +82,29 @@ export default async function StockDetailPage({ params }: { params: Params }) {
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-6 py-8">
         {/* Stock hero */}
         <section className="space-y-3">
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <h1 className="font-mono text-3xl font-semibold tracking-tight sm:text-4xl">
               {stock.ticker}
             </h1>
             <p className="text-muted-foreground text-base">{stock.name}</p>
+            {insight && (
+              <StrongSignalBadge
+                scores={[
+                  insight.technical_score,
+                  insight.sentiment_score,
+                  insight.professional_score,
+                  insight.social_score,
+                ]}
+              />
+            )}
+            {insight && (
+              <SignalStrip
+                technical={insight.technical_score}
+                sentiment={insight.sentiment_score}
+                professional={insight.professional_score}
+                social={insight.social_score}
+              />
+            )}
           </div>
           <p className="text-muted-foreground text-[11px] tracking-wider uppercase">
             {stock.sector}
@@ -171,6 +192,44 @@ export default async function StockDetailPage({ params }: { params: Params }) {
                 value={insight.insider_activity ?? "—"}
                 hint={insight.insider_detail}
               />
+            )}
+          </section>
+        )}
+
+        {/* Analyst consensus bar (separate from signal breakdown for prominence) */}
+        {insight && (insight.analyst_buy || insight.analyst_hold || insight.analyst_sell) && (
+          <section className="border-border/60 bg-card/30 rounded-xl border p-5">
+            <AnalystBar
+              buy={insight.analyst_buy}
+              hold={insight.analyst_hold}
+              sell={insight.analyst_sell}
+            />
+            {insight.analyst_price_target != null && (
+              <p className="text-muted-foreground mt-3 text-xs">
+                Consensus price target:{" "}
+                <span className="text-foreground font-mono tabular-nums">
+                  ${insight.analyst_price_target.toFixed(2)}
+                </span>
+                {insight.prev_close != null && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <span
+                      className={
+                        insight.analyst_price_target > insight.prev_close
+                          ? "text-emerald-500"
+                          : "text-red-500"
+                      }
+                    >
+                      {(
+                        ((insight.analyst_price_target - insight.prev_close) / insight.prev_close) *
+                        100
+                      ).toFixed(1)}
+                      % from current
+                    </span>
+                  </>
+                )}
+              </p>
             )}
           </section>
         )}
@@ -315,7 +374,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           Signals are derived from {insight?.sources_total_count ?? "multiple"} sources combining
           price/technical indicators (yfinance + ta-lib), news sentiment (FinBERT), professional
           opinion (Finnhub + SEC EDGAR), and social mentions (StockTwits + ApeWisdom + Reddit).{" "}
-          <Link href="/methodology" className="text-foreground underline-offset-2 hover:underline">
+          <Link href="/about" className="text-foreground underline-offset-2 hover:underline">
             Read the full methodology →
           </Link>
         </section>

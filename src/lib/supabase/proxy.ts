@@ -42,8 +42,11 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/public");
+  // Public pages — readable without auth. /about is the trust/methodology page;
+  // shared stock links could land here too, so we let unauthed visitors read.
+  const isPublicPage = pathname === "/about";
 
-  if (!authed && !isAuthRoute && !isPublicAsset && pathname !== "/") {
+  if (!authed && !isAuthRoute && !isPublicAsset && !isPublicPage && pathname !== "/") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
