@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
+import { MarketScheduleBar } from "@/components/market-schedule-bar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StockCard } from "@/components/stock-card";
@@ -108,6 +109,9 @@ export default async function Home() {
           </div>
         </section>
 
+        {/* Market schedule + bet window status */}
+        <MarketScheduleBar />
+
         {/* Quick stats row */}
         <section className="grid grid-cols-3 gap-3">
           <Stat label="Credits" value={credits.toLocaleString()} />
@@ -165,19 +169,6 @@ export default async function Home() {
             </div>
           </section>
         )}
-
-        {/* Bet-window note */}
-        <section className="border-border/60 bg-card/20 flex flex-col items-start gap-2 rounded-xl border p-5">
-          <span className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
-            Bet window
-          </span>
-          <p className="text-sm leading-relaxed">
-            Predictions for the next trading day open at{" "}
-            <span className="font-mono">8:00 PM ET</span> and lock at{" "}
-            <span className="font-mono">9:15 AM ET</span> the next morning. The UP/DOWN buttons on
-            each card go live once the bet sheet ships.
-          </p>
-        </section>
       </main>
 
       <footer className="border-border/60 border-t">
