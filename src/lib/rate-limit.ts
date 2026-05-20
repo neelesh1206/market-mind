@@ -47,6 +47,10 @@ const LIMITERS: Record<string, { requests: number; windowSec: number }> = {
 
   // Watchlist toggles. Users sometimes toggle several stocks in a session.
   watchlist: { requests: 20, windowSec: 60 },
+
+  // Thumbs feedback on verdicts. Users may toggle their vote a couple of
+  // times exploring the UI; 10/min covers that without enabling spam.
+  submitFeedback: { requests: 10, windowSec: 60 },
 };
 
 // Cache constructed limiters so we don't rebuild on every check.

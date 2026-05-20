@@ -8,6 +8,7 @@ import { ArticleDetail } from "@/components/article-detail";
 import { AnalystBar } from "@/components/analyst-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { PredictionFeedback } from "@/components/prediction-feedback";
 import { TrackRecordBadge } from "@/components/track-record-badge";
 import { VerdictBreakdown } from "@/components/verdict-breakdown";
 import { VerdictChip } from "@/components/verdict-chip";
@@ -15,6 +16,10 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
 import { fetchStockTrackRecord } from "@/lib/feed";
+import {
+  fetchPredictionFeedbackSummary,
+  fetchUserPredictionFeedback,
+} from "@/lib/feedback";
 import { fetchBetsForTradingDay } from "@/lib/bets";
 import { fetchDailyBars } from "@/lib/price-history";
 import { getLivePrice } from "@/lib/live-prices";
@@ -113,10 +118,19 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const userBet = userId ? (betsByStockId[stock.id] ?? null) : null;
   const isAnon = userId === null;
 
-  // Per-stock track record — fired after detail resolves so we know the
-  // stock_id. Single extra round-trip; cached via Next's fetch when the
-  // page is revalidated. Failures degrade to "Building track record".
-  const stockTrackRecord = await fetchStockTrackRecord(supabase, stock.id);
+  // Per-stock track record + feedback rows — fired after detail resolves
+  // so we know the stock_id / verdict_id. Single extra round-trip each;
+  // cached via Next's fetch when the page is revalidated. Failures degrade
+  // gracefully (empty aggregates, "Building track record" state).
+  const [stockTrackRecord, feedbackSummary, userFeedback] = await Promise.all([
+    fetchStockTrackRecord(supabase, stock.id),
+    verdict
+      ? fetchPredictionFeedbackSummary(supabase, verdict.id)
+      : Promise.resolve({ helpfulCount: 0, totalCount: 0 }),
+    verdict
+      ? fetchUserPredictionFeedback(supabase, userId, verdict.id)
+      : Promise.resolve(null),
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -313,6 +327,16 @@ export default async function StockDetailPage({ params }: { params: Params }) {
                 ciUpper={stockTrackRecord.ciUpper}
               />
             </div>
+            {/* Thumbs feedback on this verdict — closes the loop with users.
+                Anon viewers see the aggregate + sign-in CTA; signed-in users
+                can vote and the count updates optimistically. */}
+            <PredictionFeedback
+              predictionId={verdict.id}
+              ticker={stock.ticker}
+              signedIn={!isAnon}
+              initialUserVote={userFeedback?.helpful ?? null}
+              initialSummary={feedbackSummary}
+            />
             <div className="border-border/40 border-t pt-4">
               <VerdictBreakdown insight={insight} variant="full" />
             </div>
