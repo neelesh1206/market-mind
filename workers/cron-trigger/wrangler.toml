@@ -1,0 +1,41 @@
+# Cloudflare Worker config for MarketMind's external cron trigger.
+#
+# Deploy: `npx wrangler deploy` from this directory.
+# Logs:   `npx wrangler tail` (live tail).
+# Secret: `npx wrangler secret put GITHUB_PAT` (one-time, after deploy).
+#
+# Why cron triggers here instead of in GH Actions: see workers/cron-trigger/README.md
+# and the ADR linked from it. Short version: GH's scheduled triggers are
+# best-effort with multi-hour drift; CF Workers cron is reliable within ~1 min.
+
+name = "marketmind-cron-trigger"
+main = "src/index.ts"
+compatibility_date = "2026-05-19"
+
+# Workers free tier covers this easily: 3 fires/day × 30 days = ~90 invocations/month,
+# vs the 100k/day free limit. CPU is trivial — one HTTP POST.
+
+[triggers]
+crons = [
+  # Keep these in lockstep with CRON_TO_WORKFLOW in src/index.ts. A cron
+  # that fires here but isn't in that map will log an error and no-op.
+
+  # 00:00 UTC Tue–Sat = 20:00 ET Mon–Fri → fetch-insights.yml
+  "0 0 * * 2-6",
+
+  # 21:15 UTC Mon–Fri = 17:15 ET Mon–Fri → resolve-predictions.yml
+  "15 21 * * 1-5",
+
+  # 23:00 UTC Sunday = 19:00 ET Sunday → compute-leaderboard.yml
+  "0 23 * * 0",
+]
+
+[vars]
+# Public — not a secret. The PAT is the only sensitive bit, set via
+# `wrangler secret put GITHUB_PAT`.
+REPO = "neelesh1206/market-mind"
+
+# Observability — pipe Worker logs to Cloudflare's log aggregator.
+# Free tier includes basic logs; this just makes them queryable from the dash.
+[observability]
+enabled = true

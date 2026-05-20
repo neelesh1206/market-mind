@@ -17,6 +17,9 @@ const eslintConfig = defineConfig([
     "htmlcov/**",
     "playwright-report/**",
     "test-results/**",
+    // Cloudflare Worker has its own tsconfig + types (workers-types,
+    // not next.js). Don't try to lint it with the Next ESLint preset.
+    "workers/**",
   ]),
 ]);
 

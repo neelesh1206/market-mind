@@ -1,8 +1,10 @@
 name: Fetch Insights
 
 # When this runs:
-# - Schedule: ~8 PM ET Mon–Fri night (drifts ±1h with DST; acceptable for our 11h overnight window).
-#   `0 0 * * 2-6` → Tue–Sat at 00:00 UTC = Mon–Fri at 20:00 EDT (or 19:00 EST).
+# - Triggered EXTERNALLY by the Cloudflare Worker at `workers/cron-trigger/`
+#   on the schedule `0 0 * * 2-6` UTC (= 20:00 ET Mon–Fri). See ADR 0016 for
+#   why we moved off `schedule:` here — GH Actions cron drift was multi-hour
+#   on free tier, CF Workers cron is reliable within ~1 min.
 # - Manual: workflow_dispatch with optional --ticker / --limit / --dry-run for testing.
 #
 # Output: writes a row to `stock_insights` per active stock, top-3 articles to
@@ -10,8 +12,6 @@ name: Fetch Insights
 # entry in `pipeline_runs`. Sentry catches any unhandled exceptions.
 
 on:
-  schedule:
-    - cron: "0 0 * * 2-6"
   workflow_dispatch:
     inputs:
       ticker:

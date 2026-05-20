@@ -63,3 +63,8 @@ pipeline/.env
 /htmlcov/
 coverage.xml
 .coverage
+
+# Cloudflare Workers
+workers/**/node_modules
+workers/**/.wrangler
+workers/**/dist

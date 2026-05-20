@@ -1,12 +1,14 @@
 name: Compute Leaderboard
 
-# Snapshots the past week's leaderboard. Runs Sun 23:00 UTC — well after
-# Friday's 21:15 UTC resolution job, before Monday's daily-bonus reset, so
-# Mon-Fri's resolved bets are all in by the time we compute.
+# Snapshots the past week's leaderboard.
+#
+# Triggered EXTERNALLY by the Cloudflare Worker at `workers/cron-trigger/`
+# on `0 23 * * 0` UTC (= 19:00 ET Sunday — well after Friday's 17:15 ET
+# resolution job, before Monday's daily-bonus reset, so Mon–Fri's resolved
+# bets are all in by the time we compute). See ADR 0016 for why we moved
+# off GH `schedule:` triggers.
 
 on:
-  schedule:
-    - cron: "0 23 * * 0"
   workflow_dispatch:
     inputs:
       week_start:

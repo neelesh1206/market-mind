@@ -4,12 +4,12 @@ name: Resolve Predictions
 # trading day, sets WIN/LOSS/VOID, pays out winners, refunds VOIDs, bumps
 # user profile counters.
 #
-# Schedule: 21:15 UTC Mon-Fri ≈ 5:15 PM EDT / 4:15 PM EST. The 15-min cushion
-# after the 4 PM close gives Yahoo time to publish the day's final bar.
+# Triggered EXTERNALLY by the Cloudflare Worker at `workers/cron-trigger/`
+# on `15 21 * * 1-5` UTC (= 17:15 ET Mon–Fri, 75 min after the 16:00 ET
+# close to give Yahoo time to publish the day's final bar). See ADR 0016
+# for why the `schedule:` block was removed from this workflow.
 
 on:
-  schedule:
-    - cron: "15 21 * * 1-5"
   workflow_dispatch:
     inputs:
       date:

@@ -206,6 +206,28 @@ ORDER BY failures DESC;
    - MarketWatch session cookie expired → refresh cookie from browser, update secret
 5. Re-trigger workflow: `gh workflow run fetch-insights.yml`
 
+### Pipeline didn't fire at all
+
+Pipeline triggers come from the Cloudflare Worker at `workers/cron-trigger/`,
+NOT from GitHub `schedule:` blocks (we removed those in ADR 0016 — GH crons
+were unreliable). If a run is completely missing from the GH Actions tab:
+
+1. **Check the Worker fired**: `cd workers/cron-trigger && npx wrangler tail`
+   and wait for the next scheduled time, OR check Cloudflare → Workers →
+   marketmind-cron-trigger → Logs for the most recent invocation.
+2. **If Worker fired but no GH run**: the dispatch API call failed. The
+   Worker logs the response code — common causes are an expired
+   `GITHUB_PAT` (401), the PAT losing `actions:write` scope (403), or the
+   workflow file being renamed (404). Rotate the PAT via
+   `npx wrangler secret put GITHUB_PAT` from `workers/cron-trigger/`.
+3. **If Worker didn't fire**: check `wrangler.toml [triggers] crons` is
+   deployed (run `npx wrangler deployments list` to see the active
+   version). Re-deploy with `npx wrangler deploy` if needed.
+4. **Always-on workaround**: manually dispatch the workflow:
+   `gh workflow run fetch-insights.yml`. This routes around the
+   Worker entirely and uses GH's `workflow_dispatch:` trigger (which
+   is rock-solid even when scheduled triggers are flaky).
+
 ### Resolution job missed market close
 
 1. Check if market actually closed normally (holiday? early close?)
