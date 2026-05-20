@@ -37,9 +37,11 @@ Configurable via env:
     STOCK_REQUEST_MIN_MARKET_CAP_USD     — defaults $2B
     STOCK_ROTATION_MIN_VOTES             — defaults 3
     MAX_STOCK_ROTATION_SWAPS_PER_WEEK    — defaults 3 (universe-collapse safeguard)
-    STOCK_DEMOTION_BET_LOOKBACK_DAYS     — defaults 60 (was 30; lengthened so
-                                            fewer stocks meet the "no recent bets"
-                                            gate at low user activity)
+    STOCK_DEMOTION_BET_LOOKBACK_DAYS     — defaults 15. Short window is fine
+                                            because the swap-cap + market-cap-asc
+                                            ordering together gate what actually
+                                            demotes; lookback now just sizes the
+                                            candidate pool the ordering picks from.
 
 Demotion ordering — when there are more demotion-eligible stocks than
 promotion candidates, we demote the ones with the smallest market cap first.
@@ -82,7 +84,7 @@ FINNHUB_BASE = "https://finnhub.io/api/v1"
 MIN_MARKET_CAP_USD = int(os.getenv("STOCK_REQUEST_MIN_MARKET_CAP_USD", "2000000000"))
 MIN_VOTES = int(os.getenv("STOCK_ROTATION_MIN_VOTES", "3"))
 MAX_SWAPS_PER_WEEK = int(os.getenv("MAX_STOCK_ROTATION_SWAPS_PER_WEEK", "3"))
-BET_LOOKBACK_DAYS = int(os.getenv("STOCK_DEMOTION_BET_LOOKBACK_DAYS", "60"))
+BET_LOOKBACK_DAYS = int(os.getenv("STOCK_DEMOTION_BET_LOOKBACK_DAYS", "15"))
 
 
 def run(args: argparse.Namespace) -> int:

@@ -143,7 +143,7 @@ def complete_pipeline_run(
 
 
 def fetch_demotion_candidates(
-    client: Client, *, bet_lookback_days: int = 60
+    client: Client, *, bet_lookback_days: int = 15
 ) -> list[dict[str, Any]]:
     """Return active stocks eligible for demotion.
 

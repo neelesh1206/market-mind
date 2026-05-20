@@ -541,15 +541,16 @@ natural_swap_count = min(len(demotion_candidates), len(validated))
 swap_count = min(natural_swap_count, MAX_SWAPS_PER_WEEK)
 ```
 
-### B. `STOCK_DEMOTION_BET_LOOKBACK_DAYS` widened 30 → 60
+### B. `STOCK_DEMOTION_BET_LOOKBACK_DAYS` tightened 30 → 15
 
-The "no recent bets" gate is genuinely the part of the demotion
-criteria that goes brittle at low activity. A stock that hasn't
-been bet on in 30d isn't necessarily unloved — it may just be that
-nobody's bet on it *recently*. 60d strikes a balance: long enough
-to genuinely indicate disinterest, short enough that abandoned
-tickers still cycle out. Configurable, so we can tune as the data
-matures.
+Original draft of this safeguard widened the window to 60d to shrink
+the demotion-eligible pool, but on reflection the cap (A) and the
+market-cap-asc ordering (C) together already gate what actually
+demotes — the lookback now just *sizes the candidate pool the
+ordering selects from*. Shorter is better in that frame: it means
+even briefly-stale tickers become candidates, and the market-cap
+order keeps the actually-demoted set sensible. Set to 15d as a
+default; configurable so we can tune as the data matures.
 
 ### C. Demotion ordering: smallest market cap first
 
@@ -578,9 +579,9 @@ the candidate).
 
 ### Net effect on the dry-run
 
-With the new defaults applied to today's state:
-- Demotion-eligible pool: **31 stocks** (lookback widened, but
-  still high because activity is genuinely low)
+With the new defaults applied to today's state, demotion-eligible pool
+remains large because activity is genuinely low — but it doesn't
+matter, since:
 - Promotion validated: **0** (HON has 1 vote, < 3 threshold)
 - Natural swap count: **0**
 - Capped swap count: **0**
@@ -597,7 +598,7 @@ demotion-eligible names will be the first to go.
 STOCK_REQUEST_MIN_MARKET_CAP_USD: "2000000000"
 STOCK_ROTATION_MIN_VOTES: "3"
 MAX_STOCK_ROTATION_SWAPS_PER_WEEK: "3"   # NEW
-STOCK_DEMOTION_BET_LOOKBACK_DAYS: "60"   # NEW (was hardcoded 30)
+STOCK_DEMOTION_BET_LOOKBACK_DAYS: "15"   # NEW (was hardcoded 30)
 ```
 
 ### Files touched
