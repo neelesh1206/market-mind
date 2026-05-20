@@ -2,10 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
-import { fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
+import { fetchConvictionList, fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
 import { fetchBetsForTradingDay, fetchUnrevealedResolved } from "@/lib/bets";
 import { getDailyBonusStatus } from "@/lib/bonus";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
+import { ConvictionList } from "@/components/conviction-list";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -36,15 +37,17 @@ export default async function Home() {
   // any bets the user already placed for the current trading day.
   const schedule = getMarketSchedule();
   const todayEt = etCalendarDate();
-  const [feedUnsorted, trackRecord, betsByStockId, bonusStatus, unrevealedResults] =
+  const [feedUnsorted, trackRecord, betsByStockId, bonusStatus, unrevealedResults, conviction] =
     await Promise.all([
       fetchHomeFeed(supabase, watchlist),
       fetchTrackRecord(supabase, 30),
       fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel),
       getDailyBonusStatus(supabase, userId, todayEt),
       fetchUnrevealedResolved(supabase, userId, 10),
+      fetchConvictionList(supabase, schedule.tradingDayLabel, 5),
     ]);
   const feed = rankFeed(feedUnsorted);
+  const watchlistTickers = new Set(watchlist.map((s) => s.ticker));
 
   const { data: profile } = await supabase
     .from("user_profiles")
@@ -134,6 +137,15 @@ export default async function Home() {
 
         {/* Market schedule + bet window status */}
         <MarketScheduleBar />
+
+        {/* Today's conviction — universe-wide top long + top short. Stars
+            mark stocks already on the user's watchlist. Sources from
+            marketmind_predictions.rank_in_universe (ADR 0015). */}
+        <ConvictionList
+          long={conviction.long}
+          short={conviction.short}
+          watchlistTickers={watchlistTickers}
+        />
 
         {/* Quick stats row */}
         <section className="grid grid-cols-3 gap-3">

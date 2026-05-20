@@ -92,6 +92,99 @@ export async function fetchHomeFeed(
 }
 
 /**
+ * One entry in the conviction list. Shape is intentionally small —
+ * we only need what the row renders.
+ */
+export type ConvictionEntry = {
+  ticker: string;
+  name: string;
+  direction: "UP" | "DOWN" | "NEUTRAL";
+  combined_score: number;
+  rank_in_universe: number;
+};
+
+export type ConvictionList = {
+  long: ConvictionEntry[];   // rank 1, 2, 3 ... (strongest bullish first)
+  short: ConvictionEntry[];  // rank N, N-1, N-2 ... (strongest bearish first)
+};
+
+/**
+ * MarketMind's strongest reads across the universe for a given trading day.
+ *
+ * Cross-sectional ranking (ADR 0015) gives every stock a `rank_in_universe`:
+ * 1 = highest combined_score (strongest bullish), N = lowest (strongest
+ * bearish). This helper returns the top-N from each end so the home page
+ * can render a "today's conviction" surface independent of any individual
+ * user's watchlist.
+ *
+ * Returns empty arrays if the pipeline hasn't ranked the universe yet
+ * for that date — caller decides whether to render an empty state.
+ */
+export async function fetchConvictionList(
+  client: SupabaseClient,
+  tradingDayLabel: string,
+  count = 5,
+): Promise<ConvictionList> {
+  // Two small queries instead of one big sort-in-JS pass — both indexed
+  // by (prediction_date, rank_in_universe) per migration 20260519000010.
+  const baseSelect =
+    "direction, combined_score, rank_in_universe, stocks(ticker, name)";
+
+  const [longRes, shortRes] = await Promise.all([
+    client
+      .from("marketmind_predictions")
+      .select(baseSelect)
+      .eq("prediction_date", tradingDayLabel)
+      .not("rank_in_universe", "is", null)
+      .order("rank_in_universe", { ascending: true })
+      .limit(count),
+    client
+      .from("marketmind_predictions")
+      .select(baseSelect)
+      .eq("prediction_date", tradingDayLabel)
+      .not("rank_in_universe", "is", null)
+      .order("rank_in_universe", { ascending: false })
+      .limit(count),
+  ]);
+
+  if (longRes.error) {
+    console.warn(`[conviction] long-side query failed: ${longRes.error.message}`);
+  }
+  if (shortRes.error) {
+    console.warn(`[conviction] short-side query failed: ${shortRes.error.message}`);
+  }
+
+  type Row = {
+    direction: "UP" | "DOWN" | "NEUTRAL";
+    combined_score: number | null;
+    rank_in_universe: number | null;
+    stocks: { ticker: string; name: string } | null;
+  };
+
+  const toEntry = (r: Row): ConvictionEntry | null => {
+    if (!r.stocks || r.combined_score === null || r.rank_in_universe === null) {
+      return null;
+    }
+    return {
+      ticker: r.stocks.ticker,
+      name: r.stocks.name,
+      direction: r.direction,
+      combined_score: r.combined_score,
+      rank_in_universe: r.rank_in_universe,
+    };
+  };
+
+  const long = ((longRes.data ?? []) as unknown as Row[])
+    .map(toEntry)
+    .filter((e): e is ConvictionEntry => e !== null);
+  const short = ((shortRes.data ?? []) as unknown as Row[])
+    .map(toEntry)
+    .filter((e): e is ConvictionEntry => e !== null);
+
+  return { long, short };
+}
+
+/**
  * Track-record stats across all resolved MarketMind predictions.
  * Always include sample size — small samples are noisy.
  */
