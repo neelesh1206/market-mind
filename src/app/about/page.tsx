@@ -38,9 +38,14 @@ export const metadata = {
 export default async function AboutPage() {
   // Track-record is public read (anon allowed by RLS).
   const supabase = await createClient();
-  const [tr30, tr90] = await Promise.all([
+  // Multi-window stats for the "How we're doing" section. All-time uses a
+  // 5-year window which is comfortably larger than the project's lifespan;
+  // we'll widen it the day that becomes a constraint.
+  const [tr7, tr30, tr90, trAll] = await Promise.all([
+    fetchTrackRecord(supabase, 7),
     fetchTrackRecord(supabase, 30),
     fetchTrackRecord(supabase, 90),
+    fetchTrackRecord(supabase, 365 * 5),
   ]);
 
   return (
@@ -86,27 +91,81 @@ export default async function AboutPage() {
           </p>
         </section>
 
-        {/* Track record */}
-        <section className="border-border/60 bg-card/30 space-y-3 rounded-xl border p-6">
-          <h2 className="text-base font-semibold">Our track record</h2>
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            MarketMind&apos;s daily verdicts are resolved against actual market close. We publish
-            the score for accountability — small samples are noisy, so we always show the
-            denominator.
-          </p>
-          <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-6">
-            <TrackRecordBadge
-              total={tr30.total}
-              correct={tr30.correct}
-              accuracy={tr30.accuracy}
-              windowLabel="30 days"
-            />
-            <TrackRecordBadge
-              total={tr90.total}
-              correct={tr90.correct}
-              accuracy={tr90.accuracy}
-              windowLabel="90 days"
-            />
+        {/* How we're doing — multi-window track record with honest framing */}
+        <section className="border-border/60 bg-card/30 space-y-4 rounded-xl border p-6">
+          <header className="space-y-1.5">
+            <h2 className="text-base font-semibold">How we&apos;re doing</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              MarketMind&apos;s daily verdicts are resolved against actual market close. We publish
+              the score for accountability — and the 95% confidence interval (the range in
+              parentheses) so you can see how much to trust the headline number.
+            </p>
+          </header>
+
+          {/* Honesty caption — sample-size-aware framing in front of the numbers */}
+          <div className="border-border/40 bg-background/40 rounded-md border-l-2 border-l-amber-500/60 px-3 py-2">
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              <span className="text-foreground font-medium">A note on sample size: </span>
+              {honestyCaption(trAll.total)}
+            </p>
+          </div>
+
+          {/* Per-window grid */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <WindowCell windowLabel="last 7 days" {...tr7} />
+            <WindowCell windowLabel="last 30 days" {...tr30} />
+            <WindowCell windowLabel="last 90 days" {...tr90} />
+            <WindowCell windowLabel="all-time" {...trAll} />
+          </div>
+
+          {/* What the CI actually means — one short explanation */}
+          <details className="group cursor-pointer">
+            <summary className="text-muted-foreground hover:text-foreground text-xs leading-relaxed select-none">
+              What does the 95% confidence interval actually mean?
+            </summary>
+            <p className="text-muted-foreground mt-2 pl-4 text-xs leading-relaxed">
+              It&apos;s the range that the <span className="text-foreground italic">true</span>{" "}
+              accuracy most likely sits in, given the limited sample we&apos;ve resolved so far. A
+              60% headline with a (40–80%) CI means: with this much data, anything from 40% to 80%
+              is statistically consistent with what we&apos;ve seen. As more predictions resolve,
+              the CI shrinks — that&apos;s how you know the number is becoming trustworthy. (We use
+              the{" "}
+              <a
+                href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                Wilson score interval
+              </a>
+              , the standard for binomial proportions at small N.)
+            </p>
+          </details>
+
+          {/* Feedback prompt — a real way for users to tell us this is/isn't helping */}
+          <div className="border-border/40 border-t pt-3">
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              <span className="text-foreground">Have feedback?</span> Tell us what&apos;s missing,
+              confusing, or wrong —{" "}
+              <a
+                href="https://github.com/neelesh1206/market-mind/issues/new?labels=feedback&title=Feedback%3A%20"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+              >
+                open a GitHub issue
+                <ExternalLink className="h-3 w-3" aria-hidden />
+              </a>{" "}
+              or email{" "}
+              <a
+                href="mailto:neelesh1206@gmail.com?subject=MarketMind%20feedback"
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                neelesh1206@gmail.com
+              </a>
+              . Honest critique on whether the calls are helping you make sense of the market is
+              the single most valuable input we can get right now.
+            </p>
           </div>
         </section>
 
@@ -850,5 +909,60 @@ function ScenarioRow({
       <td className={`px-2 py-1.5 text-right font-semibold ${tone(net)}`}>{fmt(net)}</td>
       <td className={`px-2 py-1.5 text-right font-semibold ${vClass}`}>{verdict}</td>
     </tr>
+  );
+}
+
+/**
+ * Sample-size-aware framing in front of the multi-window track-record grid.
+ * The thresholds (30, 100) are heuristic — they correspond to roughly the
+ * sample sizes where the Wilson CI half-width drops below 0.15 and 0.10
+ * respectively at 50% accuracy.
+ */
+function honestyCaption(allTimeTotal: number): string {
+  if (allTimeTotal === 0) {
+    return "No predictions have resolved yet. The first day's worth of accuracy data lands the trading day after launch.";
+  }
+  if (allTimeTotal < 30) {
+    return `Only ${allTimeTotal} resolved predictions so far — the confidence interval is wide on purpose. With this little data, the headline accuracy number is mostly noise. We need ~100+ resolutions before it starts to mean something stable.`;
+  }
+  if (allTimeTotal < 100) {
+    return `${allTimeTotal} resolved predictions in. The CI is still wide; we'd want at least 100 before claiming the accuracy number is stable. Keep watching it narrow.`;
+  }
+  return `${allTimeTotal} resolved predictions and counting. The confidence interval has narrowed enough that the headline accuracy is a defensible estimate — but still bounded by the CI, not equal to the point estimate.`;
+}
+
+/**
+ * One cell in the multi-window track-record grid. Renders a window label
+ * + the badge with CI inline. Empty windows show "Building track record"
+ * (handled by the badge itself).
+ */
+function WindowCell({
+  windowLabel,
+  total,
+  correct,
+  accuracy,
+  ciLower,
+  ciUpper,
+}: {
+  windowLabel: string;
+  total: number;
+  correct: number;
+  accuracy: number | null;
+  ciLower: number | null;
+  ciUpper: number | null;
+}) {
+  return (
+    <div className="border-border/40 bg-background/40 rounded-md border px-3 py-2.5">
+      <p className="text-muted-foreground mb-1.5 text-[10px] tracking-wider uppercase">
+        {windowLabel}
+      </p>
+      <TrackRecordBadge
+        total={total}
+        correct={correct}
+        accuracy={accuracy}
+        ciLower={ciLower}
+        ciUpper={ciUpper}
+      />
+    </div>
   );
 }

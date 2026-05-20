@@ -132,6 +132,8 @@ export default async function Home() {
               total={trackRecord.total}
               correct={trackRecord.correct}
               accuracy={trackRecord.accuracy}
+              ciLower={trackRecord.ciLower}
+              ciUpper={trackRecord.ciUpper}
               windowLabel="30 days"
             />
           </div>

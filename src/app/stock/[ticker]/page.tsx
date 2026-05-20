@@ -8,11 +8,13 @@ import { ArticleDetail } from "@/components/article-detail";
 import { AnalystBar } from "@/components/analyst-bar";
 import { SignalStrip } from "@/components/signal-strip";
 import { StrongSignalBadge } from "@/components/strong-signal-badge";
+import { TrackRecordBadge } from "@/components/track-record-badge";
 import { VerdictBreakdown } from "@/components/verdict-breakdown";
 import { VerdictChip } from "@/components/verdict-chip";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
+import { fetchStockTrackRecord } from "@/lib/feed";
 import { fetchBetsForTradingDay } from "@/lib/bets";
 import { fetchDailyBars } from "@/lib/price-history";
 import { getLivePrice } from "@/lib/live-prices";
@@ -110,6 +112,11 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const { stock, insight, articles, verdict } = detail;
   const userBet = userId ? (betsByStockId[stock.id] ?? null) : null;
   const isAnon = userId === null;
+
+  // Per-stock track record — fired after detail resolves so we know the
+  // stock_id. Single extra round-trip; cached via Next's fetch when the
+  // page is revalidated. Failures degrade to "Building track record".
+  const stockTrackRecord = await fetchStockTrackRecord(supabase, stock.id);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -291,6 +298,21 @@ export default async function StockDetailPage({ params }: { params: Params }) {
         {verdict && insight && (
           <section className="border-border/60 bg-card/40 space-y-4 rounded-xl border p-5">
             <VerdictChip verdict={verdict} showReasoning />
+            {/* Per-stock track record — accountability per ADR 0007.
+                "MarketMind has been right N of M on AAPL". Wilson 95% CI
+                visible so users see uncertainty at small samples. */}
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-muted-foreground/70 uppercase tracking-wider">
+                On {stock.ticker}:
+              </span>
+              <TrackRecordBadge
+                total={stockTrackRecord.total}
+                correct={stockTrackRecord.correct}
+                accuracy={stockTrackRecord.accuracy}
+                ciLower={stockTrackRecord.ciLower}
+                ciUpper={stockTrackRecord.ciUpper}
+              />
+            </div>
             <div className="border-border/40 border-t pt-4">
               <VerdictBreakdown insight={insight} variant="full" />
             </div>

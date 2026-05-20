@@ -6,6 +6,7 @@ import type {
   StockInsight,
 } from "@/types/insight";
 import { computeSyntheticVerdict } from "@/lib/verdict";
+import { wilsonInterval } from "@/lib/wilson";
 
 /**
  * For a user's watchlist, fetch the most-recent stock_insight per stock plus
@@ -188,10 +189,22 @@ export async function fetchConvictionList(
  * Track-record stats across all resolved MarketMind predictions.
  * Always include sample size — small samples are noisy.
  */
+/**
+ * Result of a track-record query — point estimate plus Wilson 95% CI.
+ * `ciLower`/`ciUpper` are null when `total = 0` (no information).
+ */
+export type TrackRecord = {
+  total: number;
+  correct: number;
+  accuracy: number | null;
+  ciLower: number | null;
+  ciUpper: number | null;
+};
+
 export async function fetchTrackRecord(
   client: SupabaseClient,
   windowDays = 30,
-): Promise<{ total: number; correct: number; accuracy: number | null }> {
+): Promise<TrackRecord> {
   const since = new Date(Date.now() - windowDays * 86400_000).toISOString().slice(0, 10);
 
   const { data, error } = await client
@@ -205,13 +218,56 @@ export async function fetchTrackRecord(
     // Defensive: pre-migration the table may not exist yet. Report empty
     // track record rather than blowing up the page that called us.
     console.warn(`[feed] fetchTrackRecord failed (likely migration not applied): ${error.message}`);
-    return { total: 0, correct: 0, accuracy: null };
+    return { total: 0, correct: 0, accuracy: null, ciLower: null, ciUpper: null };
   }
   const rows = data ?? [];
   const total = rows.length;
   const correct = rows.filter((r: { outcome: string | null }) => r.outcome === "WIN").length;
   const accuracy = total > 0 ? correct / total : null;
-  return { total, correct, accuracy };
+  const ci = total > 0 ? wilsonInterval(correct, total) : null;
+  return {
+    total,
+    correct,
+    accuracy,
+    ciLower: ci?.lower ?? null,
+    ciUpper: ci?.upper ?? null,
+  };
+}
+
+/**
+ * Per-stock track record across all resolved verdicts for one stock.
+ *
+ * Surfaces on `/stock/[ticker]` as accountability ("MarketMind has been
+ * right N of M times on AAPL specifically"). VOID outcomes drop out of
+ * the denominator the same way as the universe-wide track record.
+ */
+export async function fetchStockTrackRecord(
+  client: SupabaseClient,
+  stockId: string,
+): Promise<TrackRecord> {
+  const { data, error } = await client
+    .from("marketmind_predictions")
+    .select("outcome")
+    .eq("stock_id", stockId)
+    .eq("resolved", true)
+    .neq("outcome", "VOID");
+
+  if (error) {
+    console.warn(`[feed] fetchStockTrackRecord failed: ${error.message}`);
+    return { total: 0, correct: 0, accuracy: null, ciLower: null, ciUpper: null };
+  }
+  const rows = data ?? [];
+  const total = rows.length;
+  const correct = rows.filter((r: { outcome: string | null }) => r.outcome === "WIN").length;
+  const accuracy = total > 0 ? correct / total : null;
+  const ci = total > 0 ? wilsonInterval(correct, total) : null;
+  return {
+    total,
+    correct,
+    accuracy,
+    ciLower: ci?.lower ?? null,
+    ciUpper: ci?.upper ?? null,
+  };
 }
 
 /**
