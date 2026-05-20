@@ -1,5 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/**
+ * Soft + hard weekly limit on unique-ticker requests per user.
+ *
+ * Canonical source of truth — also enforced in the `submit_stock_request`
+ * RPC (server-side authority). UI surfaces "X of 5 used" via this constant.
+ *
+ * Lives in `src/lib/` (not `src/app/actions/`) because constants can't be
+ * exported from `"use server"` modules in Next.js — server-action files
+ * are restricted to async-function exports only. Trying to export a `const`
+ * from one breaks the Turbopack build with "Only async functions are
+ * allowed to be exported in a "use server" file."
+ */
+export const WEEKLY_REQUEST_LIMIT = 5;
+
 export type TopStockRequest = {
   ticker: string;
   companyName: string | null;

@@ -3,15 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/rate-limit";
+import { WEEKLY_REQUEST_LIMIT } from "@/lib/stock-requests";
 import {
   searchTickers,
   validateTickerForRequest,
   type TickerSearchResult,
 } from "@/lib/ticker-search";
 
-/** Soft + hard weekly limit on unique-ticker requests per user.
- *  Also enforced in the RPC. UI surfaces "X of 5 used" via this constant. */
-export const WEEKLY_REQUEST_LIMIT = 5;
+// WEEKLY_REQUEST_LIMIT lives in src/lib/stock-requests.ts because "use server"
+// modules can ONLY export async functions — not constants or types. We
+// import it here for use inside the actions; clients import directly from
+// the lib module. The RPC `submit_stock_request` also enforces the same
+// limit server-side; this constant is just for UI display + a cheap
+// pre-RPC short-circuit.
 
 // =============================================================================
 // Submit a stock request.

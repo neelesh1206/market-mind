@@ -9,13 +9,11 @@ import {
   submitStockRequest,
 } from "@/app/actions/stock-requests";
 import type { TickerSearchResult } from "@/lib/ticker-search";
-import type { TopStockRequest } from "@/lib/stock-requests";
+import {
+  WEEKLY_REQUEST_LIMIT,
+  type TopStockRequest,
+} from "@/lib/stock-requests";
 import { TickerSearchInput } from "@/components/ticker-search-input";
-
-/** Soft + hard weekly limit on unique-ticker requests per user. Matches
- *  the constant in src/app/actions/stock-requests.ts and the RPC's
- *  enforcement. */
-export const WEEKLY_REQUEST_LIMIT = 5;
 
 type Props = {
   topRequests: TopStockRequest[];
