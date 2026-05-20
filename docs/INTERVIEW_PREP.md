@@ -64,7 +64,7 @@ If someone says "walk me through this project":
 
 > 1. **The problem.** Prediction markets are having a moment (Polymarket, Kalshi), and stock-tracking apps are commodity. The gap I wanted to fill: a *transparent, gamified, no-money-required* prediction layer for stocks where every score links back to its source so users can audit the model.
 >
-> 2. **The architecture.** Three layers. The Python pipeline is the *producer* — it runs on GitHub Actions every night and writes signal data to Supabase Postgres. The database is the *contract* — every read goes through it, never directly to the data vendors. The Next.js app on Vercel is the *consumer* — it reads from Supabase via Row-Level-Security policies and presents the UI. Decoupling like that means the website never makes a third-party API call during a page render. Page loads stay fast and don't depend on vendor uptime.
+> 2. **The architecture.** Three layers. The Python pipeline is the *producer* — it runs on GitHub Actions every night and writes signal data to Supabase Postgres. The database is the *contract* — every signal/verdict read goes through it. The Next.js app on Vercel is the *consumer* — it reads from Supabase via Row-Level-Security policies and presents the UI. The one exception to "no third-party calls at render time" is the live-price layer (Finnhub), and even there we go through an Upstash Redis cache with a 5-minute TTL — so on a steady-state page render most calls hit Redis, not Finnhub. The signal data — buckets, verdict, articles — is always served from Postgres. Vendor outages can't take down the website.
 >
 > 3. **The signal engine.** Each stock gets four bucket scores in `[-1, +1]`: technical (RSI, MACD, moving averages from yfinance), sentiment (news articles scored by FinBERT, which I run locally on the pipeline runner to avoid HuggingFace rate limits), professional (analyst consensus from Finnhub plus insider transactions from SEC EDGAR), and social (StockTwits bullish ratio plus Reddit mentions, with the social bucket deliberately damping rather than amplifying — research consistently shows retail-attention spikes precede underperformance for non-meme tickers).
 >
@@ -142,7 +142,7 @@ That's about 90 seconds. Add or trim depending on the interviewer's attention.
    └────────────────────────────────────────────┘
 ```
 
-**Key property:** the Next.js app **never calls a third-party data source during a page render**, except Finnhub for live prices (cached in Upstash, fail-soft to `prev_close`). Pipeline → DB → app is a one-way dependency. Vendor outages don't take down the website.
+**Key property:** the Next.js app reads **all signal data** (verdict, buckets, articles, sparklines) from Postgres only — Pipeline → DB → app is a one-way dependency for the bulk of the page. **The one exception** is the live-price layer: `getLivePrices()` is called during page render on the home feed and stock detail page, going first to Upstash Redis (5-min TTL) and only hitting Finnhub on cache misses. Under steady-state traffic, ~99% of page renders make zero outbound third-party calls. Finnhub outages degrade gracefully to the pipeline's `prev_close` — the page renders either way.
 
 ---
 
