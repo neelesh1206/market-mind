@@ -51,6 +51,11 @@ const LIMITERS: Record<string, { requests: number; windowSec: number }> = {
   // Thumbs feedback on verdicts. Users may toggle their vote a couple of
   // times exploring the UI; 10/min covers that without enabling spam.
   submitFeedback: { requests: 10, windowSec: 60 },
+
+  // Stock request submit / remove. Each submission does a Finnhub round-trip
+  // (validation), so we throttle more conservatively than other write actions.
+  // 10/min covers a user exploring + submitting 3-4 requests in a sitting.
+  submitStockRequest: { requests: 10, windowSec: 60 },
 };
 
 // Cache constructed limiters so we don't rebuild on every check.

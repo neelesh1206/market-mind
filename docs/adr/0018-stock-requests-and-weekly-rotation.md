@@ -1,0 +1,193 @@
+# ADR 0018 — Stock requests + weekly universe rotation
+
+**Status:** Accepted (Phase 1 shipped; Phase 2 pending)
+**Date:** 2026-05-20
+
+## Context
+
+MarketMind covers a curated **50-stock universe**. The picks were
+hand-selected at project start to span sectors (mega-cap tech +
+financials + healthcare + a few retail/meme tickers) but the universe
+is **static** — there's no mechanism for users to suggest additions, and
+no automated rotation when interest drifts. Two problems become visible
+as the user base grows:
+
+1. **Discovery friction**: a user wants to track LLY (Eli Lilly,
+   pharma mega-cap) but it's not in the pool. They can't bet on it,
+   can't see its verdict, can't add it to their watchlist. The only
+   recourse is filing a GitHub issue — which doesn't scale.
+2. **Dead weight**: some stocks in the pool aren't being used. If
+   nobody has put MCHP on their watchlist and nobody has bet on it
+   in months, it's costing pipeline budget for no user value. Static
+   universes accumulate dead weight by default.
+
+We want a feedback loop: **user demand decides what's in the universe.**
+
+## Decision
+
+Ship in two phases.
+
+### Phase 1 — Stock-request collection (this commit)
+
+Users can request tickers via a **new tab on `/stocks`** ("Request to be
+added"), alongside the existing "Browse available" tab. Same mental
+model — manage stock relationships — in one place, rather than a
+separate route. (Previously prototyped as a standalone `/requests`
+page; refactored to tabs after a UX review during the same session.)
+Aggregate vote counts are visible publicly; per-user vote rows are
+RLS-protected. Voting is **one vote per (user, ticker)** — idempotent
+upsert; re-clicking is a no-op; removing a vote deletes the row.
+
+**Universe of requestable tickers: top ~2000 by market cap.**
+Implementation: not a maintained static list (would go stale + adds
+operational surface). Instead, **just-in-time validation** at request
+submit time:
+
+- Search uses Finnhub `/search?q=` which is already scoped to US-listed
+  equities. Output filtered to `type=Common Stock` so ETFs, warrants,
+  preferred shares don't pollute the dropdown.
+- When the user picks a search result, the server action calls
+  Finnhub `/stock/profile2?symbol=X`. If market cap (USD) is below
+  `MIN_MARKET_CAP_USD` (default $2B, env-var overrideable), the
+  submission is rejected with a copy line that explains the threshold.
+
+$2B threshold corresponds roughly to rank ~1800 in US equities (varies
+day-to-day). Keeps junk requests out while comfortably covering anyone
+who'd be in a "top 2000" list.
+
+### Phase 2 — Weekly universe rotation (next commit)
+
+The 50-stock universe rotates **once per week on Sunday** based on
+demand + activity signals.
+
+**Always exactly 50 stocks.** If we demote N, we promote N. Never
+more, never less. The cross-sectional ranking + track-record stability
+work we shipped earlier this week depends on a stable universe count;
+a floating size would break those.
+
+**Demotion eligibility** (both conditions must hold):
+- Zero users have the stock on their watchlist
+- Zero user bets placed on the stock in the last 30 days
+
+**Promotion order**: top-requested tickers (by unique-user vote count
+desc, latest-request-time desc as a tiebreaker) that pass full
+validation — Finnhub `/profile2` resolves, market cap still above
+threshold, yfinance returns ≥1 year of price bars (so technical
+indicators can be computed).
+
+**Cadence**: Sunday cron, fired by the Cloudflare Worker that already
+owns scheduling (ADR 0016). Specifically: **Sunday 12:00 UTC** (which
+maps to ~7-8 AM ET depending on DST). Why this time:
+
+- Market is closed (US equities don't trade Sun)
+- The Friday-evening pipeline run has already produced Monday's
+  insights for the *current* universe
+- Sunday morning rotation leaves the rest of the day to fill in
+  insights for newly-promoted stocks before Monday's market opens
+- After rotation completes, a targeted re-fill pipeline run executes
+  ONLY for the newly-promoted stocks (no need to re-fetch the unchanged
+  47-48 stocks; they already have Monday insights)
+
+**Bets disabled on Sundays.** This is a new product behavior. Two
+reasons:
+
+1. *Race avoidance.* If a user bets on stock X at 11 AM Sunday and the
+   12 PM rotation demotes X, their bet sits in DB on an inactive stock.
+   Closing the bet window over Sunday eliminates the race entirely.
+2. *Universe clarity.* The pool you bet on Monday morning is the pool
+   that just got rotated into. Users see the new universe Sunday
+   afternoon onwards but can't bet against it until Monday open. Sets
+   a clear rhythm.
+
+Implementation: `market-schedule.ts` gains a `weekend-rotation` phase
+that overrides bet-window-open to false from Saturday 12:00 AM ET
+through Monday 12:00 AM ET. The bet CTA on home / detail pages shows
+"Bets reopen Monday — universe rotating."
+
+**Safety floor**: never demote if it would drop the universe below 50.
+Concretely: if N stocks meet demotion criteria but only M tickers
+pass promotion validation (where M < N), demote only the M
+lowest-utility stocks (lowest watchlist+bet count) and leave the rest
+in place this week.
+
+## Alternatives considered
+
+- **Maintain a static "top 2000" list** refreshed quarterly via a
+  manual script. Simpler at runtime (no per-request Finnhub call), but
+  list goes stale, requires recurring human effort, and provides no
+  value over runtime validation. Rejected.
+
+- **No market-cap threshold; allow any US-listed common stock.**
+  Maximum flexibility. Rejected because the request list would fill up
+  with sub-$500M tickers we genuinely can't serve well — Finnhub
+  analyst coverage thins out below ~$1B, yfinance volume/RSI calculations
+  get noisy below ~$2B daily volume, and the existing FinBERT sentiment
+  bucket gets less reliable when news flow is thin.
+
+- **Rotate continuously** (any day a request crosses a threshold,
+  promote immediately). Simpler than "weekly batch." Rejected because
+  continuous rotation breaks track-record comparability — verdicts for
+  a stock that just got promoted Monday lunch can't be compared to
+  verdicts from a stock that was in the universe all week. Weekly
+  cadence aligns with the natural unit-of-measurement (the trading
+  week) and gives users a predictable schedule.
+
+- **Different threshold (10 votes? 20?) before promotion is even
+  considered.** Reasonable on a larger user base. At current scale
+  (single-digit users), even 3 votes is significant. We start with
+  "top-N where N = number of qualifying demotions" and tighten when
+  the request volume justifies it.
+
+- **Allow demotion below 50 if the rotation budget is full.** Rejected
+  because the cross-sectional ranking, track-record CIs, and conviction
+  list all assume a fixed N. Letting N fluctuate would force us to
+  reframe a lot of UX ("Top 5 of how many?") for no good reason.
+
+- **Hard cap of N promotions per week.** Considered (max 2-3 swaps to
+  avoid wholesale rotation). Rejected because the demotion criteria
+  themselves are conservative — a stock with zero watchlists AND zero
+  bets in 30 days is genuinely dead weight, and there's no good reason
+  to keep it. The cap was a hedge against runaway churn; the criteria
+  already prevent that.
+
+## Consequences
+
+**Phase 1 effects:**
+- Users can suggest tickers; aggregate counts visible.
+- Server-side validation gives precise rejection copy (we tried real
+  hard not to surface "Finnhub returned 403" to the user — instead it's
+  "couldn't reach our data provider, try again").
+- New `stock_requests` table + three new RPCs.
+- Doesn't change any model behavior, doesn't affect the pipeline,
+  doesn't break any existing test.
+
+**Phase 2 effects (when shipped):**
+- The universe is no longer hand-curated — it adapts to actual usage.
+- Sunday no-bets is a new product constraint visible in the schedule
+  bar. Users on PT timezones will see it span their entire Sunday;
+  users on ET see it the same. Acceptable trade for the rotation
+  safety property.
+- Per-stock track records (for demoted stocks) freeze at the demotion
+  moment. Re-promotion picks back up where it left off if/when it
+  happens.
+- A small operational risk: if Finnhub goes down during the Sunday
+  rotation, no promotions can happen that week. Demotions still
+  execute (don't need network calls). The universe drops below 50
+  for the week. We accept this; it's rare and the next Sunday catches up.
+
+**What this DOESN'T address:**
+- Per-stock historical depth: a newly-promoted ticker shows up Monday
+  with no `marketmind_predictions` track record. Users see "Building
+  track record" until enough days accumulate. By design — there's no
+  shortcut.
+- Adversarial voting: a coordinated push could promote a ticker for
+  brigading reasons. The validation gate (market cap > $2B) limits the
+  damage — the worst case is a legitimate $2B stock joins the universe
+  earlier than it would have otherwise. No actual data integrity issue.
+
+## Notes
+
+Phase 1 ships with this ADR. Phase 2 (the actual rotation pipeline +
+Sunday closure) is the next signal-side commit. The schema + UI shipped
+here are designed against the Phase 2 contract; nothing in Phase 1 will
+need to change when Phase 2 lands.

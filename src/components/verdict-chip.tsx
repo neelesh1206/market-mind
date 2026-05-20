@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, ArrowUp, HelpCircle, Target } from "lucide-react";
+import { ArrowDown, ArrowUp, HelpCircle, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSyntheticVerdict } from "@/lib/verdict";
 import type { MarketMindPrediction } from "@/types/insight";

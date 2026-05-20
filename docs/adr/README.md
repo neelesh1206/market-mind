@@ -25,6 +25,7 @@ Format follows [Michael Nygard's ADR pattern](https://cognitect.com/blog/2011/11
 | [0013](0013-social-bucket-fade-the-crowd.md) | Social bucket: fade the crowd, weight informed sentiment | Accepted |
 | [0014](0014-vol-normalize-direction-threshold.md) | Vol-normalize the verdict's direction threshold (per-stock) | Accepted |
 | [0015](0015-cross-sectional-ranking.md) | Cross-sectional ranking of MarketMind verdicts (top long / top short) | Accepted |
+| [0018](0018-stock-requests-and-weekly-rotation.md) | Stock requests + weekly universe rotation (Phase 1 shipped, Phase 2 pending) | Accepted |
 
 ---
 

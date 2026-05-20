@@ -3,11 +3,18 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllStocks, fetchUserWatchlist, WATCHLIST_MAX } from "@/lib/watchlist";
+import { fetchTopStockRequests, fetchUserStockRequests } from "@/lib/stock-requests";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StockBrowser } from "@/components/stock-browser";
+import { StockRequestPanel } from "@/components/stock-request-panel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export const metadata = { title: "Browse stocks" };
+export const metadata = { title: "Manage stocks" };
+
+// Aggregate-count freshness: each visit re-fetches. Requests are low-volume,
+// so the cost is negligible and votes feel responsive.
+export const revalidate = 0;
 
 /**
  * Browse-the-pool page. Lists all active stocks with sector filter +
@@ -23,7 +30,7 @@ export default async function StocksPage() {
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
 
-  const [allStocks, watchlist, profileRes] = await Promise.all([
+  const [allStocks, watchlist, profileRes, topRequests, userVotes] = await Promise.all([
     fetchAllStocks(supabase),
     fetchUserWatchlist(supabase, userId),
     supabase
@@ -31,6 +38,8 @@ export default async function StocksPage() {
       .select("display_name, credit_balance")
       .eq("id", userId)
       .maybeSingle(),
+    fetchTopStockRequests(supabase, 100),
+    fetchUserStockRequests(supabase, userId),
   ]);
 
   const profile = profileRes.data;
@@ -65,18 +74,51 @@ export default async function StocksPage() {
 
       <main id="main" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
         <section className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Browse stocks</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Manage stocks</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            All {allStocks.length} stocks in the MarketMind pool. Add up to {WATCHLIST_MAX} to
-            your watchlist — they&apos;ll show up on your home feed with the day&apos;s signals.
+            {allStocks.length} stocks in the universe. Add up to {WATCHLIST_MAX} to your watchlist —
+            or request a new ticker to be added.
           </p>
         </section>
 
-        <StockBrowser
-          stocks={allStocks}
-          initialWatchlistIds={watchlistIds}
-          watchlistMax={WATCHLIST_MAX}
-        />
+        <Tabs defaultValue="browse" className="space-y-5">
+          <TabsList>
+            <TabsTrigger value="browse">
+              Browse available
+              <span className="text-muted-foreground ml-1.5 font-mono text-[10px] tabular-nums">
+                {allStocks.length}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="request">
+              Request to be added
+              {topRequests.length > 0 && (
+                <span className="text-muted-foreground ml-1.5 font-mono text-[10px] tabular-nums">
+                  {topRequests.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="browse" className="space-y-4">
+            <StockBrowser
+              stocks={allStocks}
+              initialWatchlistIds={watchlistIds}
+              watchlistMax={WATCHLIST_MAX}
+            />
+          </TabsContent>
+
+          <TabsContent value="request" className="space-y-4">
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Each weekend, the most-requested tickers replace inactive stocks (zero watchlists,
+              zero recent bets). Universe size stays fixed at {allStocks.length}. We accept
+              US-listed common stocks at or above $2B market cap.
+            </p>
+            <StockRequestPanel
+              topRequests={topRequests}
+              userVotes={Array.from(userVotes)}
+            />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
