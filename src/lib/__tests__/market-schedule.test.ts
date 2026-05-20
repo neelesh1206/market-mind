@@ -157,12 +157,36 @@ describe("getMarketSchedule — phase transitions", () => {
     expect(s.betWindowOpen).toBe(true); // tomorrow's window is open
   });
 
-  it("weekend phase on Saturday and Sunday", () => {
-    const sat = etDate(2026, 5, 16, 12, 0, true); // Saturday
-    const sun = etDate(2026, 5, 17, 12, 0, true); // Sunday
-    expect(getMarketSchedule(sat).phase).toBe("weekend");
-    expect(getMarketSchedule(sun).phase).toBe("weekend");
-    expect(getMarketSchedule(sat).state).toBe("weekend");
+  it("Saturday is 'weekend' phase with bet window still open for Monday", () => {
+    // Bet window opens Friday 8 PM ET → still open all Saturday for Monday's
+    // market. State stays "weekend" (no trading), phase stays generic.
+    const sat = etDate(2026, 5, 16, 12, 0, true); // Saturday noon ET
+    const schedule = getMarketSchedule(sat);
+    expect(schedule.phase).toBe("weekend");
+    expect(schedule.state).toBe("weekend");
+    expect(schedule.betWindowOpen).toBe(true);
+  });
+
+  it("Sunday is 'sunday-rotation' phase with bet window CLOSED (ADR 0018 Phase 2)", () => {
+    // Sunday is universe-rotation day — bet window forced closed all day ET
+    // even though Friday's pipeline already produced Monday's insights.
+    // Users can't bet on a stock that's about to be demoted, and the
+    // rotation pipeline operates on a quiet table.
+    const sun = etDate(2026, 5, 17, 12, 0, true); // Sunday noon ET
+    const schedule = getMarketSchedule(sun);
+    expect(schedule.phase).toBe("sunday-rotation");
+    expect(schedule.state).toBe("weekend");
+    expect(schedule.betWindowOpen).toBe(false);
+  });
+
+  it("Bet window forced closed all Sunday ET (not just midday)", () => {
+    // Boundary check — early morning, noon, evening Sunday all return closed.
+    const morning = etDate(2026, 5, 17, 6, 0, true);
+    const noon = etDate(2026, 5, 17, 12, 0, true);
+    const evening = etDate(2026, 5, 17, 22, 0, true);
+    expect(getMarketSchedule(morning).betWindowOpen).toBe(false);
+    expect(getMarketSchedule(noon).betWindowOpen).toBe(false);
+    expect(getMarketSchedule(evening).betWindowOpen).toBe(false);
   });
 
   it("trading day flips to tomorrow only AFTER pipeline completion", () => {

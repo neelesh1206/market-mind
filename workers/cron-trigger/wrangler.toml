@@ -36,6 +36,12 @@ crons = [
   # Use named "SUN" rather than 0 — Cloudflare's cron parser rejects a
   # bare 0 for day-of-week even though standard cron accepts it.
   "0 23 * * SUN",
+
+  # 12:00 UTC Sunday = ~07:00-08:00 ET Sunday (DST-dependent) →
+  # compute-stock-rotation.yml. Phase 2 of ADR 0018. Runs while bets are
+  # closed (Sunday all day per market-schedule.ts) and well before the
+  # Sunday evening compute-leaderboard run.
+  "0 12 * * SUN",
 ]
 
 [vars]

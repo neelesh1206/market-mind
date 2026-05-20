@@ -425,3 +425,86 @@ Bring this design back if any of these become true:
   cost calculus
 - We want to do queries the Finnhub API doesn't support (e.g.,
   "show me all eligible biotechs sorted by market cap")
+
+---
+
+## 2026-05-20 — Phase 2 shipped: weekly Sunday rotation
+
+The original Phase 2 design from this ADR is now implemented.
+
+### What ships
+
+- **Migration `20260520000006_stock_rotations.sql`** — new audit table
+  with one row per rotation event (action, ticker, votes_at_action,
+  reason). Public-read RLS so future "what changed this week" UI
+  surfaces can read it.
+
+- **`pipeline/compute_stock_rotation.py`** — the rotation orchestrator.
+  Implements the algorithm exactly as designed: demote candidates that
+  meet BOTH conditions (zero watchlists + zero bets/30d), promote
+  top-voted requests (≥3 unique-user votes) after fresh Finnhub
+  validation, maintain the always-50 invariant via `swap_count =
+  min(demotion, promotion)`. Idempotent — re-runs on the same day
+  produce no further effect.
+
+- **Targeted insights backfill** — after promotion, the orchestrator
+  invokes `python -m pipeline.fetch_insights --ticker X` as a
+  subprocess for each newly-promoted stock so Monday's data is
+  computed before market open. Subprocess instead of inline import
+  because (a) we get process isolation and (b) avoids refactoring
+  the existing `_process_stock` private API.
+
+- **`.github/workflows/compute-stock-rotation.yml`** — manual +
+  cron-triggered workflow. 45-min timeout (covers the validation
+  loop + 1-3 subprocess backfills × ~30s FinBERT cold start). Same
+  HuggingFace model cache as fetch-insights so backfills are warm.
+
+- **Cloudflare Worker cron entry: `0 12 * * SUN`** — Sunday 12:00 UTC
+  (~07:00-08:00 ET DST-dependent). Runs while bets are closed, well
+  before the Sunday evening compute-leaderboard run.
+
+- **`market-schedule.ts` Sunday closure** — new `sunday-rotation`
+  `CyclePhase`. `betWindowOpen` is forced `false` all day Sunday ET
+  even though Friday's pipeline already produced Monday's insights.
+  Saturday remains open (existing `weekend` phase). Two new vitest
+  test cases lock this in.
+
+- **`MarketScheduleBar` headline** — new "Bets paused · Universe
+  rotating today" copy for the sunday-rotation phase, with a
+  "Bet window reopens Monday morning" explainer.
+
+### Decisions taken at implementation time
+
+- **Subprocess for backfill** (vs. inline `_process_stock` call) —
+  ~30s cold start per new stock, only 1-3 new stocks per week, so
+  net cost is acceptable. Subprocess crash doesn't kill the
+  rotation; process isolation is a real win.
+
+- **Always-50 floor: skip promotions if not enough validate** — if
+  N tickers are demotion-eligible but only M < N pass Finnhub
+  validation (e.g., a former mega-cap has dropped below $2B since
+  the request was made), demote only M. Universe size stays at 50.
+
+- **`sector` defaults to "Uncategorized" for newly-promoted stocks**
+  if Finnhub's `finnhubIndustry` field is missing. Sector is a
+  required NOT NULL column on `stocks`; cleanup of stale "Uncategorized"
+  is a follow-up sweep, not blocking.
+
+- **Saturday stays open** — only Sunday is the closure window.
+  Original intent was to give users the full Saturday to use the
+  pre-locked Monday bet window; closure is purely for the rotation
+  window itself.
+
+### What stays open for follow-ups
+
+- **Email notification when a requested stock gets promoted** — would
+  ping users who voted for the ticker. Requires email infra we don't
+  have yet (Resend / SendGrid). Skip until/unless real users ask.
+- **Auto-add-to-watchlist on promotion** for users who requested it
+  — product decision. Reasonable defaults could go either way.
+- **"What changed this week" UI surface** reading from `stock_rotations`
+  — would show recently-added / recently-removed stocks. Cheap to
+  build; deferred to a polish pass.
+- **Sector backfill for "Uncategorized" promoted stocks** — could be
+  done via a monthly cleanup job that hits Finnhub's industry-mapping
+  endpoint.

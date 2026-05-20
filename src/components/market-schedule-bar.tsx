@@ -201,6 +201,17 @@ function headlineForPhase(s: MarketSchedule): {
         title: `Markets closed · Next predictions land ${formatRelative(s.nextPipelineCompletion)}`,
         sub: `Pipeline runs ${formatET(s.nextPipelineRun)} and is typically live by ${formatET(s.nextPipelineCompletion)}. Bet window opens then.`,
       };
+
+    case "sunday-rotation":
+      // ADR 0018 Phase 2: bet window closed all Sunday (ET) while the
+      // weekly universe rotation runs. Communicate explicitly so users
+      // who try to place a bet don't think it's broken.
+      return {
+        Icon: Zap,
+        tone: "locked",
+        title: `Bets paused · Universe rotating today`,
+        sub: `We swap in the most-requested stocks every Sunday and drop the ones nobody uses. Bet window reopens Monday morning.`,
+      };
   }
 }
 

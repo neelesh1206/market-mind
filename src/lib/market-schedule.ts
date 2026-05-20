@@ -143,7 +143,8 @@ export type CyclePhase =
   | "post-resolution" // 4:15 PM – 8 PM ET, today done, tomorrow not yet computed
   | "pipeline-running" // 8:00 PM – ~8:25 PM ET, pipeline crunching tomorrow's data
   | "after-pipeline" // ~8:25 PM – next-day 9:30 AM, fresh predictions, bet window open
-  | "weekend"; // Saturday / Sunday
+  | "weekend" // Saturday (legacy generic-weekend label)
+  | "sunday-rotation"; // Sunday — universe rotating, bet window closed all day ET (ADR 0018 Phase 2)
 
 export type MarketSchedule = {
   /** Coarse market state (preserved for backwards-compatible UI logic). */
@@ -268,8 +269,16 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
     return fromET(p.year, p.month, p.day, PIPELINE_HOUR_ET, 0);
   })();
 
+  // ADR 0018 Phase 2: Sundays are universe-rotation day. Bet window stays
+  // closed all day Sunday (ET) so users can't bet on a stock that's about
+  // to be demoted, and so the rotation pipeline operates on a quiet table.
+  // Saturday remains open — only Sunday is the rotation lockout window.
+  // (`weekday` is 0=Sun, 6=Sat per the ETParts type.)
+  const isSundayInET = nowET.weekday === 0;
   const betWindowOpen =
-    now.getTime() >= tradingDayBetOpen.getTime() && now.getTime() < tradingDayBetLock.getTime();
+    !isSundayInET &&
+    now.getTime() >= tradingDayBetOpen.getTime() &&
+    now.getTime() < tradingDayBetLock.getTime();
   const betWindowClosesAt = betWindowOpen ? tradingDayBetLock : null;
   // Next opens: if window still open, it's already open. If closed, it'll re-open
   // at tonight's 8 PM pipeline (or next weekday).
@@ -290,7 +299,10 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
   // Granular phase — drives the state-aware headline copy.
   let phase: CyclePhase;
   if (state === "weekend") {
-    phase = "weekend";
+    // Sunday gets its own phase because the bet window is closed (rotation
+    // running). Saturday stays as the generic "weekend" — bet window is
+    // still open for Monday's market.
+    phase = isSundayInET ? "sunday-rotation" : "weekend";
   } else if (state === "pre-market") {
     phase = "pre-market-bet-open"; // bet window opened last 8 PM, still open
   } else if (state === "open") {

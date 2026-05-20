@@ -50,6 +50,11 @@ const CRON_TO_WORKFLOW: Record<string, string> = {
   // accuracy into the leaderboard view. Note: CF requires "SUN" rather
   // than 0 here — see wrangler.toml comment.
   "0 23 * * SUN": "compute-leaderboard.yml",
+  // 12:00 UTC Sunday = ~07:00-08:00 ET Sunday. Weekly universe rotation
+  // (Phase 2 of ADR 0018). Bets are closed all Sunday per
+  // market-schedule.ts, so the rotation happens in a quiet window with
+  // no in-flight user actions on the stocks table.
+  "0 12 * * SUN": "compute-stock-rotation.yml",
 };
 
 export default {

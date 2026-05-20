@@ -135,3 +135,158 @@ def complete_pipeline_run(
             "error_summary": error_summary,
         }
     ).eq("id", run_id).execute()
+
+
+# =============================================================================
+# Weekly universe rotation helpers — Phase 2 of ADR 0018
+# =============================================================================
+
+
+def fetch_demotion_candidates(
+    client: Client, *, bet_lookback_days: int = 30
+) -> list[dict[str, Any]]:
+    """Return active stocks eligible for demotion.
+
+    Eligibility (both must hold):
+      - Zero rows in `user_watchlist` reference this stock_id
+      - Zero rows in `predictions` reference this stock_id in last N days
+
+    Returns the full stock row (id, ticker, name, sector, sub_sector) so the
+    caller can record audit rows + decide ordering. Sorted by ticker for
+    deterministic output across runs (tests rely on this).
+    """
+    # We can't easily express "NOT EXISTS" via the PostgREST builder, so
+    # we pull all active stocks + the IDs that ARE referenced, then
+    # subtract. At ~50 active stocks + small watchlist/bet tables this is
+    # negligible.
+    active_res = (
+        client.table("stocks")
+        .select("id, ticker, name, sector, sub_sector")
+        .eq("is_active", True)
+        .order("ticker")
+        .execute()
+    )
+    active = active_res.data or []
+    if not active:
+        return []
+
+    watchlist_res = (
+        client.table("user_watchlist").select("stock_id").execute()
+    )
+    watched_ids = {r["stock_id"] for r in (watchlist_res.data or [])}
+
+    # `predictions` doesn't include resolved/unresolved distinction here —
+    # if anyone placed a bet within the window, the stock isn't demotable.
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=bet_lookback_days)).isoformat()
+    bets_res = (
+        client.table("predictions")
+        .select("stock_id")
+        .gte("created_at", since)
+        .execute()
+    )
+    recently_bet_ids = {r["stock_id"] for r in (bets_res.data or [])}
+
+    eligible = [
+        s for s in active
+        if s["id"] not in watched_ids and s["id"] not in recently_bet_ids
+    ]
+    return eligible
+
+
+def fetch_promotion_candidates(
+    client: Client, *, min_votes: int = 3
+) -> list[dict[str, Any]]:
+    """Return top stock-request tickers eligible for promotion.
+
+    Reads from the `get_top_stock_requests` RPC (which already excludes
+    tickers that are currently in the active universe) and filters to
+    those with >= min_votes. Returned sorted by vote count desc.
+
+    The caller must still validate each ticker via Finnhub before
+    actually promoting — this just enumerates *candidate* tickers.
+    """
+    res = client.rpc("get_top_stock_requests", {"p_limit": 200}).execute()
+    rows = res.data or []
+    eligible = [
+        {
+            "ticker": r["ticker"],
+            "company_name": r.get("company_name"),
+            "vote_count": r["vote_count"],
+        }
+        for r in rows
+        if r.get("vote_count", 0) >= min_votes
+    ]
+    return eligible
+
+
+def set_stock_active(client: Client, *, stock_id: str, active: bool) -> None:
+    """Flip stocks.is_active. Used by rotation to demote/un-demote."""
+    client.table("stocks").update({"is_active": active}).eq("id", stock_id).execute()
+
+
+def insert_promoted_stock(client: Client, *, payload: dict[str, Any]) -> dict[str, Any]:
+    """Insert a new stocks row for a promoted ticker.
+
+    Payload expects at minimum: ticker, name, sector. is_active defaults
+    to true. Returns the inserted row (with id).
+
+    Sector is required by the existing schema; the rotation pipeline
+    passes 'Uncategorized' for tickers we don't have a Finnhub sector
+    mapping for yet. We'd refine sector lookup later (Finnhub /stock/profile2
+    returns a `finnhubIndustry` field which is close enough).
+    """
+    res = client.table("stocks").insert(payload).execute()
+    rows = res.data or []
+    if not rows:
+        raise RuntimeError("insert_promoted_stock returned no rows")
+    return rows[0]
+
+
+def record_rotation(
+    client: Client,
+    *,
+    stock_id: str,
+    ticker: str,
+    action: str,
+    votes_at_action: int | None = None,
+    reason: str | None = None,
+) -> None:
+    """Insert a row in stock_rotations for audit. Never raises."""
+    try:
+        client.table("stock_rotations").insert(
+            {
+                "stock_id": stock_id,
+                "ticker": ticker,
+                "action": action,
+                "votes_at_action": votes_at_action,
+                "reason": reason,
+            }
+        ).execute()
+    except Exception as e:  # noqa: BLE001
+        # Audit write failure shouldn't block the rotation. Log via stderr.
+        import logging
+        logging.getLogger("marketmind.rotation").warning(
+            "record_rotation_failed stock_id=%s action=%s err=%s",
+            stock_id, action, e,
+        )
+
+
+def delete_stock_requests_for_ticker(client: Client, *, ticker: str) -> int:
+    """Clean up stock_requests rows for a ticker that's now in the universe.
+
+    Called immediately after a successful promotion — the requests have
+    served their purpose, and `get_top_stock_requests` filters them out
+    anyway via the LEFT JOIN. Deleting them keeps the table tidy.
+
+    Returns count of rows deleted (best-effort; some Supabase REST
+    configurations return null counts, in which case we return 0).
+    """
+    res = (
+        client.table("stock_requests")
+        .delete()
+        .eq("ticker", ticker.upper())
+        .execute()
+    )
+    return len(res.data or [])
