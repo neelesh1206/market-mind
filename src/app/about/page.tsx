@@ -695,8 +695,8 @@ otherwise             →  NEUTRAL`}
             </li>
             <li>
               <span className="text-foreground font-mono">4:15 PM ET</span> — resolution job runs.
-              Two scoring windows depending on what&apos;s being resolved:
-              <ul className="text-muted-foreground mt-1.5 ml-5 list-disc space-y-1 text-sm leading-relaxed">
+              Three scoring windows depending on what&apos;s being resolved and when the user bet:
+              <ul className="text-muted-foreground mt-1.5 ml-5 list-disc space-y-1.5 text-sm leading-relaxed">
                 <li>
                   <span className="text-foreground">MarketMind&apos;s daily verdict</span> is scored{" "}
                   <span className="text-foreground font-mono">sign(close − prev_close)</span> — the
@@ -704,16 +704,30 @@ otherwise             →  NEUTRAL`}
                   gap is part of the prediction.
                 </li>
                 <li>
-                  <span className="text-foreground">User bets</span> are scored{" "}
-                  <span className="text-foreground font-mono">sign(close − open)</span> — the window
-                  matches the latest time a bet could be placed (1 PM ET).
+                  <span className="text-foreground">Pre-market user bets</span> (placed any time
+                  from 8 PM the night before up to 9:30 AM ET) are scored{" "}
+                  <span className="text-foreground font-mono">sign(close − open)</span> — neither
+                  the user nor the verdict had a real intraday price to anchor on, so the open is
+                  the only equitable bar.
+                </li>
+                <li>
+                  <span className="text-foreground">In-market user bets</span> (placed between
+                  9:30 AM and 1 PM ET) are scored{" "}
+                  <span className="text-foreground font-mono">sign(close − entry)</span> — where
+                  <em> entry</em> is the live price (Finnhub real-time quote) at the moment the bet
+                  landed. This was a fairness change in May 2026: with a single open-based bar, a
+                  user betting UP at 12:30 PM with the stock already up 2% only needed the close
+                  to <em>stay</em> above the open — a much easier call than the 8 PM bettor who
+                  had to predict the whole day. Anchoring in-market bets to the user&apos;s actual
+                  entry price puts both bettors on equal footing.
                 </li>
               </ul>
             </li>
           </ul>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Stock prices are 15-minute delayed (Massive Starter tier). News articles surface within
-            1-2 hours of publication. See{" "}
+            Stock quotes are <span className="text-foreground">real-time</span> for the live price
+            on cards and detail pages (Finnhub free tier, ~5 min Upstash cache). News articles
+            surface within 1-2 hours of publication. See{" "}
             <a
               href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0008-bet-window-into-market-hours.md"
               target="_blank"
@@ -723,7 +737,17 @@ otherwise             →  NEUTRAL`}
               ADR 0008
               <ExternalLink className="h-3 w-3" aria-hidden />
             </a>{" "}
-            for the reasoning behind the extended bet window, and{" "}
+            for why the bet window extends past market open,{" "}
+            <a
+              href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0017-entry-vs-close-resolution-for-in-market-bets.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              ADR 0017
+              <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            for the two-mode resolution model that fixed the inequity, and{" "}
             <a
               href="https://github.com/neelesh1206/market-mind/blob/main/docs/adr/0011-signal-quality-p0-fixes.md"
               target="_blank"
@@ -733,7 +757,7 @@ otherwise             →  NEUTRAL`}
               ADR 0011
               <ExternalLink className="h-3 w-3" aria-hidden />
             </a>{" "}
-            for why the two resolution paths use different windows.
+            for why MarketMind&apos;s own verdict uses a different window than user bets.
           </p>
         </section>
 
