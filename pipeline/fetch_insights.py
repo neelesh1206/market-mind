@@ -646,6 +646,12 @@ def _build_insight_payload(
     return {
         "stock_id": stock_id,
         "insight_date": target_date,
+        # `computed_at` has a `default now()` in the schema, but that only
+        # fires on INSERT — when the upsert hits the conflict path and
+        # UPDATEs an existing row, the original timestamp is preserved.
+        # We set it explicitly here so the UI's "updated N ago" label
+        # reflects when the bucket scores were actually last refreshed.
+        "computed_at": datetime.now(timezone.utc).isoformat(),
         # Price
         "prev_close": price.prev_close if price else None,
         "day_change_pct": price.day_change_pct if price else None,
