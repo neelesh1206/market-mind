@@ -217,7 +217,7 @@ export function StockRequestPanel({
         <p className="text-muted-foreground mt-4 text-xs leading-relaxed">
           Eligibility: US-listed common stocks at or above $2B market cap. Each user can
           submit up to {WEEKLY_REQUEST_LIMIT} unique tickers per rolling 7-day window. Market
-          cap is re-checked at rotation time — a ticker that's fallen below $2B since you
+          cap is re-checked at rotation time — a ticker that has fallen below $2B since you
           requested it will be skipped until it recovers.
         </p>
       </section>
@@ -367,8 +367,8 @@ export function StockRequestPanel({
         {requests.length > 0 && (
           <p className="text-muted-foreground text-xs leading-relaxed">
             Rows marked <span className="font-semibold text-emerald-600 dark:text-emerald-400">Ready</span>{" "}
-            have crossed the {PROMOTION_VOTE_THRESHOLD}-vote threshold and will be considered in this
-            Sunday's rotation (top {MAX_PROMOTIONS_PER_WEEK} by votes).
+            have crossed the {PROMOTION_VOTE_THRESHOLD}-vote threshold and will be considered in the
+            next Sunday rotation (top {MAX_PROMOTIONS_PER_WEEK} by votes).
           </p>
         )}
       </section>
