@@ -45,6 +45,34 @@ The signal pipeline runs once a night, so its `prev_close` snapshot is correct b
 
 Built as a portfolio project demonstrating: data pipelines, financial NLP, real-time-ish UX, animation craft, and enterprise-grade engineering practices.
 
+## Where each provider's data shows up
+
+The pipeline aggregates from ~10 external providers. The table below maps each one to **what we pull, what it costs, and where it surfaces in the UI** — so when someone asks "where does the analyst Buy/Hold/Sell count come from?", the answer is one row away.
+
+| Provider | What we pull | Where it surfaces | Pipeline file |
+|---|---|---|---|
+| **Yahoo Finance** (via `yfinance`) | 1 year of daily OHLCV bars + 20-day realized volatility | 30-day **sparkline** on stock detail page · Technical bucket (RSI, MACD, MA-20/50, Bollinger position, volume trend) · `prev_close` shown when no live quote · per-stock vol used to vol-normalize the verdict threshold per ADR 0014 | [`pipeline/fetchers/yfinance_fetcher.py`](pipeline/fetchers/yfinance_fetcher.py) |
+| **Massive** (formerly Polygon.io, $29/mo Starter) | Up to ~20 recent news articles per stock — headline, body, source, publish timestamp | Article cards on stock detail page · top-3 articles per stock card · raw input to FinBERT for the Sentiment bucket score | [`pipeline/fetchers/massive.py`](pipeline/fetchers/massive.py) |
+| **Finnhub** (free tier — 60 calls/min) | (1) Analyst Buy/Hold/Sell consensus + price target + rating changes  (2) Earnings calendar (days until next earnings)  (3) **Real-time** US equity quote for the live-price UI | "Analyst Buy of N" detail in Professional bucket · earnings-proximity catalyst card · **live `$X.XX · +Y%`** in the header of every stock card and detail page (cached via Upstash, 5-min TTL) | [`pipeline/fetchers/finnhub.py`](pipeline/fetchers/finnhub.py), [`src/lib/live-prices.ts`](src/lib/live-prices.ts) |
+| **SEC EDGAR** (free, government data) | (1) Form 4 — recent insider transactions, classified buy/sell/neutral  (2) 8-K — material events in the last 24 hours | "Insider buying" / "CEO bought $2M on Mar 15" in Professional bucket · 8-K catalyst card on stock detail page | [`pipeline/fetchers/sec_edgar.py`](pipeline/fetchers/sec_edgar.py) |
+| **StockTwits** (public API, no auth) | Bullish/bearish ratio + total message count per ticker (24h window) | "79% bullish · 1.2K messages" in Social bucket · volume-damped per ADR 0013 (high message counts dilute the directional signal) | [`pipeline/fetchers/stocktwits.py`](pipeline/fetchers/stocktwits.py) |
+| **ApeWisdom** (public, free) | Rank of each ticker in r/wallstreetbets mention counts (top ~500) | "ApeWisdom rank #3" surfaced in Social bucket · feeds the **herding intensity** that fades the crowd per ADR 0013 (top-ranked = negative contribution, not positive) | [`pipeline/fetchers/apewisdom.py`](pipeline/fetchers/apewisdom.py) |
+| **Reddit** (via PRAW, optional) | Mention count across r/wallstreetbets, r/stocks, r/investing for each ticker, vs 7-day baseline | "+250% mentions" in Social bucket · also feeds herding intensity per ADR 0013 | [`pipeline/fetchers/reddit.py`](pipeline/fetchers/reddit.py) |
+| **FRED** (Federal Reserve, free) | VIX (volatility index) + sector ETF performance | Stored as macro context in `signal_breakdown.macro` for future regime-aware scoring (currently fetched, not yet wired into the verdict — per ADR 0014's "regime layer is a separate item" note) | [`pipeline/fetchers/fred.py`](pipeline/fetchers/fred.py) |
+| **HuggingFace** (free tier + Pro for some models) | (1) **FinBERT weights** — downloaded once, cached, runs locally  (2) **Mistral-Nemo-Instruct** for article TL;DRs and verdict reasoning sentences (network round-trip per call) | (1) Sentiment bucket score for every article (positive/negative classification) · (2) the 140-char article TL;DR on stock cards + the one-sentence English explanation under each verdict chip | [`pipeline/processors/sentiment.py`](pipeline/processors/sentiment.py), [`pipeline/processors/summarizer.py`](pipeline/processors/summarizer.py), [`pipeline/processors/verdict.py`](pipeline/processors/verdict.py) |
+| **Supabase** (Postgres + Auth + RLS, free tier) | Database of record for everything: stocks, insights, predictions, credits, user feedback | The entire app reads from here. Pipeline is the *producer*, Supabase is the *contract*, Next.js is the *consumer* | — |
+| **Upstash Redis** (free tier, serverless HTTP) | Per-user rate limit counters · shared global live-price cache | Lets 50 stocks × N concurrent users cost only ~10 Finnhub calls/min globally · prevents runaway-client double-debits on bet placement | [`src/lib/rate-limit.ts`](src/lib/rate-limit.ts), [`src/lib/live-prices.ts`](src/lib/live-prices.ts) |
+
+### Two architectural notes on the HuggingFace dependency
+
+Both come from [ADR 0012](docs/adr/0012-local-finbert-and-hf-breaker.md) (shipped 2026-05-19, amended 2026-05-20):
+
+1. **FinBERT runs locally, not over the API.** The model file is downloaded once from HuggingFace Hub on the first pipeline run (~440 MB, then cached across runs via `actions/cache@v4`). Every subsequent classification happens in-process on the GitHub Actions runner via `transformers` + CPU `torch`. No per-article network calls; no shared rate limits; no cold-start tax. We pin to a specific commit SHA (`4556d130…`) so the weights never silently change under our resolved-prediction track record.
+
+2. **Mistral-Nemo-Instruct stays on the HF API** because 12B-parameter models don't fit on a free CI runner's RAM. A shared circuit breaker (`pipeline/processors/_hf_breaker.py`) short-circuits after 5 consecutive HF failures so an outage caps the cost at a handful of timeouts instead of bleeding the whole 50-stock run. We don't pin a Mistral SHA — display text drift is harmless, and we want the upstream improvements when Mistral ships them.
+
+**Net effect:** the prediction math is reproducible (pinned classifier weights), the display text gets the benefit of model frontier progress (drifting LLM), and the pipeline doesn't depend on HF being healthy to produce a verdict.
+
 ## Tech stack
 
 | Layer | Tech |
@@ -55,7 +83,7 @@ Built as a portfolio project demonstrating: data pipelines, financial NLP, real-
 | Pipeline | Python in GitHub Actions |
 | Stock data — historical | Massive (formerly Polygon.io) Stocks Starter — daily aggregates, news |
 | Stock data — live quotes | Finnhub free tier — real-time US equity prices (60/min) |
-| NLP | FinBERT + Llama-3 via HuggingFace Pro |
+| NLP | FinBERT (local CPU) + Mistral-Nemo-Instruct-2407 via HuggingFace Inference API |
 | Observability | Sentry + PostHog |
 | Hosting | Vercel (Hobby) |
 

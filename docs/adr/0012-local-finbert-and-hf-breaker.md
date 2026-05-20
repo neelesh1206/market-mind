@@ -187,6 +187,30 @@ current `main` HEAD, so the pin is a no-op for current behavior but
 locks us against future drift. Upgrade procedure: bump the SHA in a
 PR, re-run `fetch_insights --dry-run` against a recent date, diff
 the resulting bucket scores against the prior run, only then merge.
-The Mistral summarizer still pulls a versioned name
-(`Mistral-7B-Instruct-v0.3`) which provides similar coverage for now;
-formal revision pinning there is a future hygiene item.
+
+### 2026-05-20 amendment — different policy for Mistral
+
+The Mistral summarizer / verdict reasoner gets the OPPOSITE policy
+from FinBERT: **don't pin a SHA; bump the model name when a newer
+version writes meaningfully better text.** The asymmetry is justified
+by what each model affects:
+
+| | FinBERT | Mistral |
+|---|---|---|
+| Output | sentiment score (number) | TL;DR + verdict reasoning (English prose) |
+| Affects accuracy? | yes — feeds the sentiment bucket → verdict | no — display text only |
+| Drift breaks track record? | yes — score changes are mathematically incomparable across the boundary | no — sentences just read differently |
+| "Latest is usually better"? | not reliably; small focused model with no continuous improvement | yes; LLMs improve meaningfully across releases |
+
+So the upgrade-policy summary is: **pin what affects accuracy, drift
+what affects display.** Implementing this:
+
+- FinBERT: SHA-pinned (see above)
+- Mistral: model name bumped from `Mistral-7B-Instruct-v0.3` →
+  `Mistral-Nemo-Instruct-2407` on 2026-05-20. Same vendor (so prompt
+  format is identical), 12B vs 7B params, materially better short
+  structured outputs.
+- Future Mistral upgrades: change `DEFAULT_MODEL` in `summarizer.py`,
+  trigger `fetch_insights --ticker NVDA --limit 3 --dry-run`, eyeball
+  the output sentences, merge if better. No need for accuracy-grade
+  diffs since the model doesn't touch the prediction itself.

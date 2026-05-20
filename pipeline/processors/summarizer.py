@@ -13,10 +13,13 @@ Model + API notes:
     OpenAI-compatible interface that routes cleanly across HF's Inference
     Providers. `text_generation` against gated/Pro models tends to return
     HfHubHTTPError with no response body, which is impossible to debug.
-  - Default model is Mistral-7B-Instruct-v0.3 — reliably available on the
-    free `hf-inference` provider. Llama-3 models are gated and often Pro-only.
-  - The model is configurable via `HUGGINGFACE_SUMMARY_MODEL` env var so we
-    can A/B without code changes.
+  - Default model is Mistral-Nemo-Instruct-2407 (12B params, July 2024).
+    Bumped up from Mistral-7B-Instruct-v0.3 — same vendor (so prompt
+    format is identical), ~2× the parameters, materially better at
+    short structured outputs. See the 2026-05-20 amendment to ADR 0012
+    for the upgrade-policy rationale (drift Mistral, pin FinBERT).
+  - The model is configurable via `HUGGINGFACE_SUMMARY_MODEL` env var so
+    you can A/B or roll back without a code change.
 
 Output format:
   Single labeled-line response (TLDR / SUMMARY / INFLUENCE). Parsing tolerates
@@ -38,7 +41,7 @@ from . import _hf_breaker
 
 log = logging.getLogger("marketmind.summarizer")
 
-DEFAULT_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+DEFAULT_MODEL = "mistralai/Mistral-Nemo-Instruct-2407"
 
 PROMPT_TEMPLATE = """You are a financial news analyst summarizing one article about {ticker} stock.
 

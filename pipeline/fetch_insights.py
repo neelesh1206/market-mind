@@ -173,8 +173,12 @@ async def run(args: argparse.Namespace) -> int:
     if cfg.huggingface_api_key:
         verdict_reasoner = VerdictReasoner(
             cfg.huggingface_api_key,
+            # Default matches summarizer.py's DEFAULT_MODEL. Both the
+            # article TL;DRs and the verdict reasoning sentence share the
+            # same HF model, so a single env-var override
+            # (HUGGINGFACE_SUMMARY_MODEL) flips both at once.
             model=_os.getenv(
-                "HUGGINGFACE_SUMMARY_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"
+                "HUGGINGFACE_SUMMARY_MODEL", "mistralai/Mistral-Nemo-Instruct-2407"
             ),
             provider=_os.getenv("HUGGINGFACE_PROVIDER", "auto"),
         )

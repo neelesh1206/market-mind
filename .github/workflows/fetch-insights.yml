@@ -52,8 +52,13 @@ jobs:
       MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
       HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
       # Optional override: pick a different summarizer model.
-      # Default (set in code): mistralai/Mistral-7B-Instruct-v0.3 — works on free tier.
-      # Recommended after Pro + license acceptance: meta-llama/Meta-Llama-3.1-8B-Instruct
+      # Default (set in code): mistralai/Mistral-Nemo-Instruct-2407 — works
+      # on free tier. Drives both per-article TL;DRs and the verdict
+      # reasoning sentence. See ADR 0012's 2026-05-20 amendment for the
+      # upgrade policy (drift Mistral updates, pin FinBERT).
+      # Alternatives to experiment with:
+      #   - meta-llama/Meta-Llama-3.1-8B-Instruct (gated, needs HF Pro)
+      #   - Qwen/Qwen2.5-7B-Instruct (ungated, similar quality)
       HUGGINGFACE_SUMMARY_MODEL: ${{ secrets.HUGGINGFACE_SUMMARY_MODEL }}
       # Optional override: force a specific Inference provider.
       # Use this when the default model is gated to paid providers
