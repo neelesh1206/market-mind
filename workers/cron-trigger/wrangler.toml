@@ -12,6 +12,12 @@ name = "marketmind-cron-trigger"
 main = "src/index.ts"
 compatibility_date = "2026-05-19"
 
+# We don't expose any HTTP endpoint — this Worker only runs on its cron
+# schedule. Opting out of `*.workers.dev` keeps the surface area minimal
+# (no public URL to monitor / lock down) and silences the "register a
+# workers.dev subdomain" warning at deploy time.
+workers_dev = false
+
 # Workers free tier covers this easily: 3 fires/day × 30 days = ~90 invocations/month,
 # vs the 100k/day free limit. CPU is trivial — one HTTP POST.
 
