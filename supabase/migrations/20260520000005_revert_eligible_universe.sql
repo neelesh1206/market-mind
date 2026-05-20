@@ -41,11 +41,18 @@ drop table if exists public.universe_eligible_stocks cascade;
 --                            is the only gate. Less defense in depth,
 --                            but the surface area we lost is the table
 --                            we just dropped.
+--
+-- Signature note: `p_company_name` keeps the `default null` it inherited
+-- from migration 20260520000004. Postgres `CREATE OR REPLACE FUNCTION`
+-- cannot REMOVE a default from an existing parameter (SQLSTATE 42P13) —
+-- adding one is fine, removing one is not. The default is functionally
+-- inert because the server action always passes a value, but the
+-- signature has to keep it for the replace to succeed.
 -- ============================================================================
 
 create or replace function public.submit_stock_request(
   p_ticker        text,
-  p_company_name  text,
+  p_company_name  text default null,
   p_market_cap    bigint default null
 )
 returns void
