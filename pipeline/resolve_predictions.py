@@ -4,14 +4,21 @@ Resolution job — closes out predictions after market close.
 For each unresolved prediction whose `prediction_date` is today:
   1. Pull open_price (9:30 AM ET first trade) and close_price (4 PM ET last trade)
      from yfinance.
-  2. Determine outcome:
-       - If close_price > open_price → DIRECTION='UP' wins, 'DOWN' loses
-       - If close_price < open_price → 'DOWN' wins, 'UP' loses
+  2. Choose the reference price (per ADR 0017):
+       - Bets created before RESOLUTION_V2_CUTOFF: open_price (grandfathered,
+         see ADR 0008 — supersedes the open-vs-close-for-everyone model).
+       - Bets created after market open with a recorded price_at_placement:
+         use that as the reference (entry vs close).
+       - Otherwise: open_price (pre-market bets, or Finnhub was down at
+         placement and price_at_placement is NULL).
+  3. Determine outcome:
+       - If close_price > reference → DIRECTION='UP' wins, 'DOWN' loses
+       - If close_price < reference → 'DOWN' wins, 'UP' loses
        - If equal (rare) → VOID (refund)
        - If price data unavailable → VOID (refund)
-  3. On WIN: payout = wagered × 1.8 (rounded down to int)
-  4. Update predictions row + insert into credit_transactions ledger
-  5. Bump user_profiles counters (total/correct + streak)
+  4. On WIN: payout = wagered × 1.8 (rounded down to int)
+  5. Update predictions row + insert into credit_transactions ledger
+  6. Bump user_profiles counters (total/correct + streak)
 
 Idempotent: only touches rows where resolved=false. Re-running after a
 partial failure is safe.
@@ -28,7 +35,6 @@ import asyncio
 import logging
 import sys
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 import pandas as pd
@@ -37,13 +43,21 @@ import yfinance as yf
 from .config import load_config
 from .fetchers._normalize import to_yahoo_symbol
 from .observability import init_logging, init_sentry
+from .processors.resolution_scoring import (
+    RESOLUTION_V2_CUTOFF,  # re-exported for tests/CLI introspection
+    _choose_reference_price,
+    _evaluate,
+)
 from .supabase_client import (
     complete_pipeline_run,
     make_client,
     start_pipeline_run,
 )
 
-PAYOUT_MULTIPLIER = Decimal("1.8")
+# Keep the legacy import name available for any external caller while we
+# transition (none in-tree, but defensive). The constant lives in the
+# scoring module now.
+__all__ = ["RESOLUTION_V2_CUTOFF"]
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -56,14 +70,36 @@ async def run(args: argparse.Namespace) -> int:
 
     supabase = make_client(cfg.supabase_url, cfg.supabase_service_key)
 
-    # Fetch unresolved predictions for the target date
-    res = (
-        supabase.table("predictions")
-        .select("id, user_id, stock_id, direction, credits_wagered, stocks(ticker)")
-        .eq("prediction_date", target_date)
-        .eq("resolved", False)
-        .execute()
-    )
+    # Fetch unresolved predictions for the target date.
+    # `created_at` and `price_at_placement` drive the entry-vs-close
+    # discriminator in `_choose_reference_price` (ADR 0017).
+    try:
+        res = (
+            supabase.table("predictions")
+            .select(
+                "id, user_id, stock_id, direction, credits_wagered, "
+                "created_at, price_at_placement, stocks(ticker)"
+            )
+            .eq("prediction_date", target_date)
+            .eq("resolved", False)
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        # Graceful migration-pending degradation (ADR 0017 follow-up to #130):
+        # if price_at_placement column hasn't been migrated yet on a fresh
+        # env, fall back to the legacy SELECT shape and treat all bets as
+        # grandfathered (entry-mode requires the column).
+        msg = str(e).lower()
+        if "price_at_placement" not in msg and "42703" not in msg and "pgrst" not in msg:
+            raise
+        log.warning("price_at_placement column missing — falling back to open-mode for all bets")
+        res = (
+            supabase.table("predictions")
+            .select("id, user_id, stock_id, direction, credits_wagered, created_at, stocks(ticker)")
+            .eq("prediction_date", target_date)
+            .eq("resolved", False)
+            .execute()
+        )
     predictions = res.data or []
 
     log.info("user_predictions_to_resolve count=%s", len(predictions))
@@ -104,9 +140,12 @@ async def run(args: argparse.Namespace) -> int:
             continue
 
         for p in group:
+            reference_price, mode = _choose_reference_price(
+                bet=p, open_price=open_price, prediction_date=target_date
+            )
             outcome, payout = _evaluate(
                 direction=p["direction"],
-                open_price=open_price,
+                reference_price=reference_price,
                 close_price=close_price,
                 wagered=p["credits_wagered"],
             )
@@ -119,13 +158,17 @@ async def run(args: argparse.Namespace) -> int:
 
             if args.dry_run:
                 log.info(
-                    "dry_run_resolve id=%s ticker=%s dir=%s open=%.2f close=%.2f outcome=%s payout=%s",
-                    p["id"], ticker, p["direction"], open_price, close_price, outcome, payout,
+                    "dry_run_resolve id=%s ticker=%s dir=%s mode=%s ref=%.2f close=%.2f outcome=%s payout=%s",
+                    p["id"], ticker, p["direction"], mode, reference_price,
+                    close_price, outcome, payout,
                 )
             else:
                 _commit_resolution(
                     supabase=supabase,
                     prediction=p,
+                    # `open_price` is still stored on the row (display
+                    # fidelity — UI shows the day's open regardless of
+                    # which reference resolved the bet).
                     open_price=open_price,
                     close_price=close_price,
                     outcome=outcome,
@@ -414,19 +457,6 @@ def _fetch_mm_prices(
 def _next_day(iso_date: str) -> str:
     d = datetime.strptime(iso_date, "%Y-%m-%d").date()
     return (d.replace(day=d.day + 1) if d.day < 28 else date.fromordinal(d.toordinal() + 1)).isoformat()
-
-
-def _evaluate(*, direction: str, open_price: float, close_price: float, wagered: int) -> tuple[str, int]:
-    if open_price == close_price:
-        return ("VOID", wagered)  # refund the stake on a flat day
-
-    moved_up = close_price > open_price
-    won = (direction == "UP" and moved_up) or (direction == "DOWN" and not moved_up)
-
-    if won:
-        payout = int((Decimal(wagered) * PAYOUT_MULTIPLIER).to_integral_value())
-        return ("WIN", payout)
-    return ("LOSS", 0)
 
 
 def _resolve_void(supabase: Any, prediction: dict, log: logging.Logger, *, dry_run: bool) -> None:

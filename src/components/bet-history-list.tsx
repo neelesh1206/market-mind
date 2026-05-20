@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertCircle, ArrowDown, ArrowUp, Clock, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
-import { isStuckPrediction } from "@/lib/bets";
+import { isStuckPrediction, resolutionReferenceFor } from "@/lib/bets";
 import type { BetHistoryRow } from "@/lib/bets";
 
 type Props = {
@@ -162,13 +162,21 @@ function BetRow({ row, todayEt }: { row: BetHistoryRow; todayEt: string }) {
           </span>
           <span className="text-muted-foreground text-xs">· {row.credits_wagered} credits</span>
         </div>
-        {row.resolved && row.open_price !== null && row.close_price !== null && (
-          <PriceActionLine
-            openPrice={row.open_price}
-            closePrice={row.close_price}
-            outcome={row.outcome}
-          />
-        )}
+        {row.resolved && row.close_price !== null && (() => {
+          // Per ADR 0017: bets placed after market open with a recorded
+          // entry price are scored entry → close; everything else still
+          // open → close. The label and reference price both shift.
+          const { price, mode } = resolutionReferenceFor(row);
+          if (price == null) return null;
+          return (
+            <PriceActionLine
+              referencePrice={price}
+              referenceLabel={mode}
+              closePrice={row.close_price}
+              outcome={row.outcome}
+            />
+          );
+        })()}
       </div>
 
       {/* Status badge */}
@@ -256,18 +264,24 @@ function statusFor(
   };
 }
 
-/** Format "2026-05-19" as "May 19" — short, scannable, year-agnostic. */
+/**
+ * Displays the bar this bet was scored against and the movement to close.
+ * Label is `referenceLabel` (open|entry) — same component handles both
+ * resolution models (ADR 0008 and ADR 0017).
+ */
 function PriceActionLine({
-  openPrice,
+  referencePrice,
+  referenceLabel,
   closePrice,
   outcome,
 }: {
-  openPrice: number;
+  referencePrice: number;
+  referenceLabel: "open" | "entry";
   closePrice: number;
   outcome: BetHistoryRow["outcome"];
 }) {
-  const delta = closePrice - openPrice;
-  const pct = openPrice > 0 ? (delta / openPrice) * 100 : 0;
+  const delta = closePrice - referencePrice;
+  const pct = referencePrice > 0 ? (delta / referencePrice) * 100 : 0;
   // Color the line by direction of price movement, not outcome — a +1% move
   // is green whether the user bet UP and won or bet DOWN and lost.
   const tone =
@@ -279,7 +293,9 @@ function PriceActionLine({
 
   return (
     <div className="text-muted-foreground flex items-center gap-1.5 font-mono text-[11px]">
-      <span>open ${openPrice.toFixed(2)}</span>
+      <span>
+        {referenceLabel} ${referencePrice.toFixed(2)}
+      </span>
       <span className="opacity-60">→</span>
       <span>close ${closePrice.toFixed(2)}</span>
       <span className={cn("tabular-nums", tone)}>

@@ -284,6 +284,66 @@ export function computeBetStats(rows: BetHistoryRow[]): BetStats {
   };
 }
 
+/**
+ * Per ADR 0017 — must stay in sync with `RESOLUTION_V2_CUTOFF` in
+ * `pipeline/processors/resolution_scoring.py`. Bets created at or after
+ * this instant use the new entry-vs-close resolution model when placed
+ * after market open. Any bet from before this stays on open-vs-close
+ * (ADR 0008) so users who placed under the old rules aren't surprised.
+ */
+export const RESOLUTION_V2_CUTOFF_ISO = "2026-05-20T19:00:00.000Z";
+
+/**
+ * Mirror of the Python `_choose_reference_price` helper — answers
+ * "which bar was this bet scored against" without needing to refetch.
+ * Returns the bet's reference price and a mode label suitable for UI
+ * copy ("open" vs "entry").
+ *
+ * Must produce the SAME result as the resolver for any given bet;
+ * otherwise the UI lies about how a bet resolved. Tests in
+ * `bets.test.ts` lock the alignment in place.
+ */
+export function resolutionReferenceFor(bet: {
+  open_price: number | null;
+  price_at_placement: number | null;
+  created_at: string;
+  prediction_date: string;
+}): { price: number | null; mode: "open" | "entry" } {
+  // Grandfathered — old contract honored.
+  if (Date.parse(bet.created_at) < Date.parse(RESOLUTION_V2_CUTOFF_ISO)) {
+    return { price: bet.open_price, mode: "open" };
+  }
+  // Market open in ET on the prediction date → UTC ms. Using a quick
+  // string-format approach + Date.UTC keeps this dependency-free, and
+  // we determine DST by checking which ET offset (UTC-4 or UTC-5)
+  // applies. NYSE always opens at 9:30 wall-clock ET.
+  const [y, m, d] = bet.prediction_date.split("-").map(Number);
+  if (!y || !m || !d) return { price: bet.open_price, mode: "open" };
+  // Build a UTC instant for 9:30 ET on this date by trying both offsets
+  // and picking the one whose ET formatted hour is 9. (Robust to DST
+  // boundaries without bundling a tz library.)
+  const candidates = [
+    Date.UTC(y, m - 1, d, 13, 30), // EDT (UTC-4) → 9:30 ET in summer
+    Date.UTC(y, m - 1, d, 14, 30), // EST (UTC-5) → 9:30 ET in winter
+  ];
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    hour12: false,
+  });
+  const marketOpen = candidates.find((c) => Number(fmt.format(new Date(c))) === 9) ?? candidates[0]!;
+
+  const created = Date.parse(bet.created_at);
+  if (
+    created > marketOpen &&
+    bet.price_at_placement != null &&
+    bet.price_at_placement > 0
+  ) {
+    return { price: bet.price_at_placement, mode: "entry" };
+  }
+  return { price: bet.open_price, mode: "open" };
+}
+
 export type CreditTransaction = {
   id: string;
   user_id: string;
