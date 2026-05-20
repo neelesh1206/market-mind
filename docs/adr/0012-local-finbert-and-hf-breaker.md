@@ -206,11 +206,30 @@ So the upgrade-policy summary is: **pin what affects accuracy, drift
 what affects display.** Implementing this:
 
 - FinBERT: SHA-pinned (see above)
-- Mistral: model name bumped from `Mistral-7B-Instruct-v0.3` →
-  `Mistral-Nemo-Instruct-2407` on 2026-05-20. Same vendor (so prompt
-  format is identical), 12B vs 7B params, materially better short
-  structured outputs.
-- Future Mistral upgrades: change `DEFAULT_MODEL` in `summarizer.py`,
-  trigger `fetch_insights --ticker NVDA --limit 3 --dry-run`, eyeball
-  the output sentences, merge if better. No need for accuracy-grade
-  diffs since the model doesn't touch the prediction itself.
+- LLM (article TL;DRs + verdict reasoning): name-tracked across two
+  layers.
+  - **`DEFAULT_MODEL` in code** — the fallback for anyone running
+    without HF Pro or without the env var set. Bumped from
+    `Mistral-7B-Instruct-v0.3` → `Mistral-Nemo-Instruct-2407` on
+    2026-05-20. Stays ungated and free-tier-friendly so local dev
+    and fresh deploys just work.
+  - **`HUGGINGFACE_SUMMARY_MODEL` env var (production override)** —
+    set in GitHub Actions secrets to
+    `meta-llama/Meta-Llama-3.1-8B-Instruct`. Requires HF Pro +
+    one-time Meta license acceptance on the HF account that owns
+    the `HUGGINGFACE_API_KEY` secret. Llama-3.1-8B is the
+    production-quality model for short structured outputs; Nemo is
+    the ungated baseline.
+
+The two-layer setup means production runs the gated, higher-quality
+model while local dev still works with the ungated default. The env
+var override beats the code default at runtime, so the production
+behavior is decoupled from the `DEFAULT_MODEL` constant. *This is
+specifically why bumping `DEFAULT_MODEL` to Nemo did not change
+production output: the env var override still resolves to Llama-3.1.*
+
+Future LLM upgrades: change either the code default (for the no-Pro
+path) or update the GH Actions secret (for production), trigger
+`fetch_insights --ticker NVDA --limit 3 --dry-run`, eyeball the
+output sentences, merge / bump if better. No need for accuracy-grade
+diffs since the LLM doesn't touch the numerical prediction.
