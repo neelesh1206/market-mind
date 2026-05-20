@@ -346,3 +346,82 @@ cron handles it.
   works. The refresh job has a "skip delete if zero current rows"
   guard to prevent the most catastrophic failure mode (Finnhub returns
   nothing → we don't delete everything thinking the universe collapsed).
+
+---
+
+## 2026-05-20 reversal — rolling back the pre-loaded universe
+
+**Status of the 2026-05-20 amendment: REVERSED.** The pre-loaded
+`universe_eligible_stocks` table, refresh pipeline, seed file, and
+weekly Sunday cron are removed. Search and validation revert to
+per-request Finnhub calls with Upstash caching (the original Phase 1
+implementation).
+
+### What's kept
+
+- **5-per-rolling-7d request limit** on `submit_stock_request` —
+  this is the actual rate-limiter and the reason we can revert
+  the table without quota concerns
+- **`get_user_weekly_request_count` RPC** — UI uses it for the
+  "X of 5 used this week" badge
+- **`StockRequestPanel` UI** with the weekly badge + disable-at-limit
+  behavior
+
+### What's rolled back
+
+- `universe_eligible_stocks` table (DROP CASCADE in migration 20260520000005)
+- `pipeline/refresh_eligible_universe.py` (deleted)
+- `.github/workflows/refresh-eligible-universe.yml` (deleted)
+- `data/eligible_universe_seed.json` (deleted)
+- Sunday 04:00 UTC entry in the Cloudflare Worker cron (removed)
+- `src/lib/ticker-search.ts` (reverted to Finnhub-based)
+- `submit_stock_request` RPC restored to arg-validated form
+
+### Why the reversal
+
+Concrete math at our actual scale exposed the over-engineering:
+
+- 30 active users × 5 requests/week = 150 submits max/week
+- Plus ~7 search queries per session (debounced) = ~1050 search attempts
+- Both layers have meaningful cache hit rates (1h on search, 24h on profile2)
+- Actual Finnhub additions: ~250-400 calls/week = **~1-2 calls/min average**
+- Live prices already use ~10 calls/min worst case
+- 60/min Finnhub quota easily absorbs both
+
+The quota-isolation concern that motivated pre-loading was
+theoretically correct but practically irrelevant at this scale.
+The **5/week request cap** structurally solves the same problem
+by capping Finnhub exposure at the user-action layer, with none of
+the operational burden of a refresh cron + seed curation + 45-min
+job budget management.
+
+### The honest engineering lesson
+
+Pre-loading IS the right architecture at scale — when you have
+thousands of active users and the search/validation traffic is a
+material fraction of vendor quota. It's the wrong architecture
+when:
+
+1. The actual traffic is dominated by other use cases (live prices
+   at 10/min vs search at 1/min — the search isn't the bottleneck)
+2. You have a structural rate limiter (5/week) that's cheaper to
+   implement than the architectural one (refresh cron + seed)
+3. The operational cost (curation, cron, monitoring, recovery from
+   refresh failures) is disproportionate to the quota you'd save
+
+Knowing when NOT to apply a senior-eng pattern is itself the senior
+skill. We documented the pre-loaded design in case it becomes
+correct later (say, at 1000+ active users), but reverted because
+the trade-off is wrong today.
+
+### When to revisit
+
+Bring this design back if any of these become true:
+
+- Live-price traffic and stock-request traffic together regularly
+  approach the 60/min Finnhub quota
+- Stock-request volume exceeds ~500 submits/week sustained
+- Finnhub introduces a new pricing tier change that affects our
+  cost calculus
+- We want to do queries the Finnhub API doesn't support (e.g.,
+  "show me all eligible biotechs sorted by market cap")
