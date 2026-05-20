@@ -165,3 +165,28 @@ ADR fixes the operational reliability piece. The remaining HF
 network dependency (summarizer + reasoner) is contained but not
 eliminated — a future ADR may move those off the critical path
 entirely if the breaker proves insufficient under sustained outages.
+
+### 2026-05-20 amendment — model revision pinning
+
+The initial implementation called `AutoModel.from_pretrained("ProsusAI/finbert")`
+with no `revision=` argument, which defaults to whatever `main` HEAD
+points to on HuggingFace Hub at the moment of cache miss. That's a
+silent reproducibility hazard:
+
+- If Prosus republishes the model, our next cache miss downloads new
+  weights and `marketmind_predictions` accuracy comparisons become
+  apples-to-oranges across that boundary.
+- It's a supply-chain attack surface — a compromised `ProsusAI` HF org
+  could push poisoned weights and we'd silently consume them on the
+  next cache invalidation.
+
+Fixed by pinning `MODEL_REVISION` to a specific commit SHA in
+`sentiment.py`. The pinned SHA as of 2026-05-20 is
+`4556d13015211d73dccd3fdd39d39232506f3e43` — which is the same as the
+current `main` HEAD, so the pin is a no-op for current behavior but
+locks us against future drift. Upgrade procedure: bump the SHA in a
+PR, re-run `fetch_insights --dry-run` against a recent date, diff
+the resulting bucket scores against the prior run, only then merge.
+The Mistral summarizer still pulls a versioned name
+(`Mistral-7B-Instruct-v0.3`) which provides similar coverage for now;
+formal revision pinning there is a future hygiene item.

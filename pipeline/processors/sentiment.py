@@ -37,6 +37,20 @@ from ..fetchers.types import NewsArticle
 log = logging.getLogger("marketmind.sentiment")
 
 MODEL = "ProsusAI/finbert"
+# Pin the FinBERT weights to a specific git commit on HF Hub. Without
+# this, `from_pretrained()` defaults to `revision="main"` — meaning a
+# cache miss on a different day silently downloads whatever HEAD has
+# moved to in the meantime, and our resolved-prediction track record
+# starts comparing apples to oranges across that boundary.
+#
+# This SHA is the HEAD of ProsusAI/finbert as of 2026-05-20 (the repo
+# itself hasn't been updated since 2023-05-23 — model is effectively
+# frozen weights from the original Prosus paper). To upgrade: bump
+# this SHA in a PR, re-run the pipeline against a recent date with
+# `--dry-run`, diff the bucket scores against the prior run, and only
+# then commit. See ADR 0012.
+MODEL_REVISION = "4556d13015211d73dccd3fdd39d39232506f3e43"
+
 # Cap per-article token count. FinBERT was trained on financial sentences
 # (max ~256 tokens); longer inputs get truncated. We also pre-truncate
 # the character stream so the tokenizer doesn't waste cycles on the tail.
@@ -59,14 +73,19 @@ class FinBertSentimentProcessor:
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return
-        log.info("finbert_loading model=%s", MODEL)
+        log.info("finbert_loading model=%s revision=%s", MODEL, MODEL_REVISION[:8])
         # Lazy imports — heavyweight, only paid when sentiment actually runs.
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
         self._torch = torch
-        self._tokenizer = AutoTokenizer.from_pretrained(MODEL)
-        self._model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+        # `revision=` accepts a commit SHA, tag, or branch name. Pinning to
+        # a commit SHA gives us full reproducibility — same input, same
+        # weights, same output across every pipeline run.
+        self._tokenizer = AutoTokenizer.from_pretrained(MODEL, revision=MODEL_REVISION)
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            MODEL, revision=MODEL_REVISION
+        )
         self._model.eval()  # inference mode — disables dropout, saves memory
         self._id2label = {
             int(k): v.lower() for k, v in self._model.config.id2label.items()
