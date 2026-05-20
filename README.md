@@ -39,6 +39,10 @@ If either model fails, the numerical signal is never blocked. Sentiment falls ba
 
 MarketMind's own daily calls live in `marketmind_predictions` and are resolved at market close every day. Cumulative accuracy is shown on `/about` with sample size — small N is noisy, so the denominator is always visible alongside the percentage.
 
+### Live prices on top of pipeline insights
+
+The signal pipeline runs once a night, so its `prev_close` snapshot is correct but stale by intraday standards. To keep the UI honest during market hours, each stock card and detail page also fetches a **real-time quote from Finnhub** (free-tier `/quote` endpoint, US equities, no delay). The quote is cached in **Upstash Redis** with a 5-minute TTL — see [How we use the cache](#how-we-use-the-cache) — so 50 stocks × N users still cost at most ~10 Finnhub calls/minute globally, well under the free-tier 60/min limit. When Finnhub or Redis is down, the UI degrades to the pipeline's `prev_close` instead of crashing.
+
 Built as a portfolio project demonstrating: data pipelines, financial NLP, real-time-ish UX, animation craft, and enterprise-grade engineering practices.
 
 ## Tech stack
@@ -49,12 +53,43 @@ Built as a portfolio project demonstrating: data pipelines, financial NLP, real-
 | Backend | Supabase (Postgres + Auth + RLS) |
 | Cache | Upstash Redis |
 | Pipeline | Python in GitHub Actions |
-| Stock data | Massive (formerly Polygon.io) Stocks Starter |
+| Stock data — historical | Massive (formerly Polygon.io) Stocks Starter — daily aggregates, news |
+| Stock data — live quotes | Finnhub free tier — real-time US equity prices (60/min) |
 | NLP | FinBERT + Llama-3 via HuggingFace Pro |
 | Observability | Sentry + PostHog |
 | Hosting | Vercel (Hobby) |
 
 **Monthly cost: ~$38** ([cost breakdown](docs/ARCHITECTURE.md#cost))
+
+## How we use the cache
+
+[Upstash Redis](https://upstash.com) is a serverless, HTTP-API Redis. We use it for two unrelated workloads that share the same connection — one secret, one set of env vars, two distinct key prefixes so there's never a collision:
+
+### 1. Per-user rate limiting on mutations — prefix `mm:rl:*`
+
+Every mutation server action (`placeBet`, `cancelBet`, `claimDailyBonus`, `watchlist` toggles) gates on a sliding-window limiter (`@upstash/ratelimit`) before touching the database. The limits are conservative — 10 bets/min, 3 daily-claim attempts/min, 20 watchlist toggles/min — and exist to make "runaway useEffect" or "stale fetch on a tap" non-destructive, not to enforce business logic (the RPCs themselves have stronger invariants). Implementation in [`src/lib/rate-limit.ts`](src/lib/rate-limit.ts).
+
+**Fail-open by design**: when Redis is unconfigured (local dev) or unreachable (network blip), `rateLimit()` returns `{ ok: true }` and the action proceeds. A misconfigured cache should never lock everyone out of the app.
+
+### 2. Shared live-price cache — prefix `mm:price:*`
+
+The home feed and stock detail page each call `getLivePrices(tickers[])` which:
+
+1. **`MGET`** all tickers' cache keys in a single Redis round-trip
+2. For misses, fetches Finnhub's `/quote` endpoint in parallel via `Promise.allSettled` (one bad ticker can't break the page)
+3. Writes fresh values back with **300s TTL for successful quotes**, **60s TTL for nulls** (negative cache stops us hammering a temporarily-failing ticker without committing a 5-min black mark)
+
+Implementation in [`src/lib/live-prices.ts`](src/lib/live-prices.ts).
+
+**Why shared Redis instead of Next's `unstable_cache`:** Vercel runs each request on potentially a different function instance, each with its own in-memory cache. With per-instance caches, 50 stocks × N cold-started instances would multiply Finnhub calls past the 60/min free-tier limit. A shared global cache gives us **O(stocks / TTL) calls per minute regardless of user count** — ~10/min worst case at our 50-stock universe + 5-min TTL.
+
+**Failure modes, all graceful**: no Upstash creds → direct Finnhub on every request (works, slow); no Finnhub key → all-null responses (UI shows "—"); Finnhub 4xx/5xx/timeout → cached null entry; Redis network blip → fall through to direct Finnhub.
+
+### Footprint
+
+- **One Upstash database**, region matched to Vercel's primary deploy region (~5ms median read)
+- **Free tier covers it**: 10k commands/day, 256 MB. Our actual draw: ~3k commands/day at current traffic, ~2 MB used
+- **No persistence needed**: rate-limit counters expire naturally, price cache is short-TTL — losing the entire DB just means one slow page load while we re-fetch
 
 ## Quick start
 
