@@ -252,26 +252,43 @@ attribute filtered queries → Postgres.** Live prices (`mm:price:<TICKER>`)
 and rate-limit counters stay in Redis where they belong; this data
 moves to Postgres where it belongs.
 
-### Refresh pipeline
+### Refresh pipeline (seed-driven — revised for 45-min job budget)
 
-`pipeline/refresh_eligible_universe.py` runs weekly:
+`pipeline/refresh_eligible_universe.py` runs weekly. **Key constraint:
+GitHub Actions free tier caps individual jobs at 45 min.** The naive
+"scan all 12K US tickers" approach (~3h 20m at 60 calls/min Finnhub
+limit) doesn't fit, so we use a seed-driven design:
 
-1. Pull all US-listed common stocks via Finnhub `/stock/symbol`
-   (1 call, ~12K tickers)
-2. For each, fetch `/stock/profile2` at 1.1s pacing (≈55 calls/min,
-   safely under the 60/min limit)
-3. Filter to market cap ≥ $2B; collect ~2000 eligible rows
-4. Bulk upsert into `universe_eligible_stocks` in 200-row chunks
-5. Delete rows that aren't in the current run (handles tickers
-   falling below the threshold week-over-week)
+1. Load `data/eligible_universe_seed.json` — a curated, version-
+   controlled list of ~200-2000 known eligible US-listed names.
+2. For each seed ticker, fetch Finnhub `/stock/profile2` at 1.1s
+   pacing (≈55 calls/min, safely under the 60/min limit).
+3. Filter to market cap ≥ $2B + valid US listing; collect rows.
+4. Bulk upsert into `universe_eligible_stocks` in 200-row chunks.
+5. Delete table rows whose ticker isn't in the current run
+   (handles seed shrinkage / tickers dropping below threshold).
 
-Bootstrap (first run): ~3h 20m at the pacing rate. Steady-state weekly
-runs are ~30-45 min since we mostly re-verify market caps for already-
-eligible tickers.
+Runtime: ~37 min for a 2000-ticker seed. Fits in 45 min with margin.
+The initial commit ships with ~200 seed tickers (~3.7 min runtime);
+expand the seed quarterly via off-CI curation as the request volume
+justifies.
+
+**The seed gets re-curated quarterly**, not weekly — IPO/delisting
+cadence is slow enough that monthly-or-better is fine for "what's
+eligible." The weekly refresh keeps market caps current for the seed.
 
 Schedule: Sunday 04:00 UTC via the Cloudflare Worker cron (ADR 0016).
 That's ~midnight Sunday ET — 8 hours before the Phase 2 rotation
 pipeline (still pending) needs the data.
+
+### Why a JSON file in repo, not a database table
+
+The seed is "data treated as code": version-controlled, reviewable
+via PR, auditable in `git log`, no runtime dependency to refresh.
+Storing it as a database table would require its own seed-loading
+step on every fresh environment, complicating local dev. JSON is
+the right answer for slow-moving, small, structured data — the
+canonical "configuration over implementation" trade.
 
 ### 5-per-week request limit
 

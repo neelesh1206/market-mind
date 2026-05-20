@@ -35,10 +35,13 @@ jobs:
     name: Refresh universe_eligible_stocks
     runs-on: ubuntu-latest
     environment: production
-    # 240 min: bootstrap (first run) takes ~3h 20m at 60 calls/min for
-    # ~12K US tickers. Steady-state weekly runs land in 30-45 min, well
-    # under this ceiling.
-    timeout-minutes: 240
+    # 45 min: GH Actions free-tier job budget. The seed-driven design
+    # (see ADR 0018's 2026-05-20 amendment) iterates the ~200-2000 names
+    # in `data/eligible_universe_seed.json` at 1.1s pacing — 2000 tickers
+    # = ~37 min, well under this ceiling. We DO NOT iterate the full
+    # ~12K US ticker space because that would take ~3h 20m, blowing the
+    # budget.
+    timeout-minutes: 45
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

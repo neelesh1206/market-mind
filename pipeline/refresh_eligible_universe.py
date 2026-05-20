@@ -11,10 +11,16 @@ Architecture rationale (ADR 0018 amendment, 2026-05-20):
   - no Finnhub call on the request-handling path
   - Finnhub's 60/min quota stays isolated for live prices
 
+Seed-driven design (revised 2026-05-20 for the 45-min GH Actions cap):
+  - We DO NOT iterate the full ~12K US ticker space — that'd take ~3h 20m
+    at the 60/min Finnhub rate limit, which doesn't fit our job budget.
+  - Instead we iterate a curated seed (`data/eligible_universe_seed.json`)
+    of ~2000 known eligible names. Quarterly we re-curate that seed off-CI.
+  - Each weekly run: ~33 min for 2000 tickers (1 call/sec). Fits in 45.
+
 Run:
-  - Bootstrap (first time): ~3h 20m at 60 calls/min for ~12K US tickers
-  - Steady-state weekly: ~30-45m (only the ~2000 already-eligible
-    tickers + a few hundred candidates near the threshold get refreshed)
+  - First run: same ~33 min as steady-state (seed-sized iteration)
+  - Steady-state weekly: ~33 min
 
 CLI:
   python -m pipeline.refresh_eligible_universe              # full run
@@ -25,11 +31,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -41,6 +49,11 @@ from .supabase_client import (
     make_client,
     start_pipeline_run,
 )
+
+# Seed lives at the repo root's `data/` directory — alongside other
+# version-controlled static data. The refresh script runs from the
+# project root in CI; locally it should be invoked the same way.
+SEED_PATH = Path(__file__).resolve().parent.parent / "data" / "eligible_universe_seed.json"
 
 log = logging.getLogger("marketmind.refresh_universe")
 
@@ -90,11 +103,23 @@ async def run(args: argparse.Namespace) -> int:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=FINNHUB_TIMEOUT_SECONDS) as client:
-            # Step 1: pull the candidate symbol list. One Finnhub call.
-            candidates = await _fetch_us_symbols(client, finnhub_key)
+        async with httpx.AsyncClient(
+            timeout=FINNHUB_TIMEOUT_SECONDS,
+            # follow_redirects is False by default; we don't expect Finnhub
+            # /profile2 to redirect, but enabling it is defensive (Finnhub
+            # has been known to 302 some endpoints to CDN URLs).
+            follow_redirects=True,
+        ) as client:
+            # Step 1: load the curated seed (no Finnhub call at this layer).
+            # See ADR 0018's 2026-05-20 amendment for why we iterate a
+            # committed seed rather than the full US ticker space.
+            candidates = _load_seed_tickers()
             stats["candidates_fetched"] = len(candidates)
-            log.info("refresh_universe_candidates count=%s", len(candidates))
+            log.info(
+                "refresh_universe_seed_loaded count=%s path=%s",
+                len(candidates),
+                SEED_PATH,
+            )
 
             if args.limit:
                 candidates = candidates[: args.limit]
@@ -173,25 +198,41 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _fetch_us_symbols(client: httpx.AsyncClient, api_key: str) -> list[str]:
-    """One Finnhub call returns ALL US-listed symbols. We filter to common
-    stock by `type` to drop ETFs, warrants, etc."""
-    url = f"{FINNHUB_BASE}/stock/symbol?exchange=US&token={api_key}"
-    resp = await client.get(url)
-    resp.raise_for_status()
-    data = resp.json()
-    # Defensive: not all rows have `type`. We keep the ones explicitly
-    # marked Common Stock; "Common Stock" is the canonical Finnhub label.
-    common = [
-        r["symbol"]
-        for r in data
-        if r.get("type") == "Common Stock"
-        and r.get("symbol")
-        # Filter foreign listings: a ticker with a dot is usually an ADR
-        # variant ("BRK.B" is fine; "AAPL.DE" is the German listing).
-        and (not r["symbol"].count(".") > 1)
-    ]
-    return sorted(set(common))
+def _load_seed_tickers() -> list[str]:
+    """Read the committed seed file and return its list of tickers.
+
+    The seed lives at `data/eligible_universe_seed.json` and is version-
+    controlled — see ADR 0018's 2026-05-20 amendment for the rationale
+    (it lets us iterate ~2000 known names within a 45-min GH Actions
+    budget instead of scanning all ~12K US symbols, which would take
+    ~3h 20m). Quarterly we re-curate this seed off-CI.
+
+    Format (only `ticker` is required; other keys are informational):
+        {
+          "_meta": {...},
+          "tickers": [
+            {"ticker": "AAPL", "hint_name": "Apple Inc."},
+            ...
+          ]
+        }
+    """
+    if not SEED_PATH.exists():
+        raise FileNotFoundError(
+            f"Seed file not found at {SEED_PATH}. "
+            f"Did you forget to commit data/eligible_universe_seed.json?"
+        )
+    with SEED_PATH.open() as f:
+        payload = json.load(f)
+    tickers_raw = payload.get("tickers", [])
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in tickers_raw:
+        t = (entry.get("ticker") or "").strip().upper()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
 
 
 async def _fetch_eligible_row(
