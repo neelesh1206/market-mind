@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { createClient } from "@/lib/supabase/client";
 
@@ -11,6 +12,15 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(
     params.get("error") === "oauth" ? "Sign-in failed. Try again." : null,
   );
+
+  // Surface OAuth-redirect errors via toast too, not just the inline banner.
+  // Users coming back from Google may not immediately notice the banner;
+  // a toast catches the eye and stays for the default ~5s.
+  useEffect(() => {
+    if (params.get("error") === "oauth") {
+      toast.error("Sign-in failed. Try again.");
+    }
+  }, [params]);
 
   async function signInWithGoogle() {
     setLoading(true);
@@ -26,6 +36,7 @@ export function LoginForm() {
 
     if (oauthError) {
       setError(oauthError.message);
+      toast.error(oauthError.message);
       setLoading(false);
     }
     // On success, Supabase redirects away — the browser never returns here.

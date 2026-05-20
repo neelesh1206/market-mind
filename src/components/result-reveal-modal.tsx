@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import confetti from "canvas-confetti";
 import { ArrowDown, ArrowUp, ChevronRight, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { markRevealed } from "@/app/actions/reveals";
 import { haptic } from "@/lib/haptics";
@@ -74,7 +75,14 @@ export function ResultRevealModal({ bets }: Props) {
       persistedIds.current.add(current.id);
       const idToPersist = current.id;
       startTransition(async () => {
-        await markRevealed([idToPersist]);
+        // If markRevealed fails the result is "user sees the same reveal
+        // on next page load" — annoying but not destructive (their credits
+        // were already settled at resolution time). Surface the failure
+        // softly so the user knows to refresh manually if it persists.
+        const result = await markRevealed([idToPersist]);
+        if (!result.ok) {
+          toast.error("Couldn't mark this as seen — refresh later if it shows again.");
+        }
       });
     }
     setFlipped(false);
@@ -101,7 +109,11 @@ export function ResultRevealModal({ bets }: Props) {
       .filter((id) => !persistedIds.current.has(id));
     if (unpersisted.length > 0) {
       startTransition(async () => {
-        await markRevealed(unpersisted);
+        const result = await markRevealed(unpersisted);
+        if (!result.ok) {
+          // Same softening as in persistAndAdvance — non-destructive.
+          toast.error("Couldn't mark these as seen — refresh later if they show again.");
+        }
       });
     }
     setOpen(false);
