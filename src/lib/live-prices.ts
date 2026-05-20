@@ -3,28 +3,33 @@ import { Redis } from "@upstash/redis";
 /**
  * Live-price layer for the home feed + stock detail page.
  *
+ * **Data source: Finnhub.** Their `/quote` endpoint returns real-time US
+ * stock quotes on the free tier (60 calls/min, 30/sec). We originally tried
+ * Polygon's snapshot endpoint but it's gated to the $29/mo Starter plan —
+ * free tier returns 403 NOT_AUTHORIZED. Finnhub is the same kind of "free
+ * tier with real-time US equities" deal we'd hoped Polygon was.
+ *
  * **Why a shared Redis cache instead of `unstable_cache`:** Vercel runs each
  * request on potentially a different function instance with its own
- * `unstable_cache` store. With 50 stocks × N instances we'd blow through
- * Polygon's free-tier 5/min quota the moment traffic picks up. Upstash gives
- * us one global cache that every function instance reads from — Polygon sees
- * AT MOST `(stocks / 60s) * cache_ttl_minutes` calls, regardless of how
- * many users are browsing. With our 5-minute TTL on 50 stocks, that's
- * worst-case 10 calls/minute spread across the universe.
+ * `unstable_cache` store. With 50 stocks × N instances we could blow through
+ * Finnhub's 60/min quota. Upstash gives us one global cache that every
+ * function instance reads from — Finnhub sees AT MOST `stocks / cache_ttl`
+ * calls. With our 5-minute TTL on 50 stocks that's ~10/min, comfortably
+ * under the limit.
  *
  * **Graceful degradation paths:**
- *   1. No Upstash creds → fetch direct from Polygon every time (works, slow)
- *   2. No Polygon key → return all nulls (callers must tolerate)
- *   3. Polygon 429/timeout for a ticker → cache the null briefly so we don't
- *      hammer a failing endpoint; UI shows "—" gracefully
- *   4. Redis network blip → fall through to direct Polygon (fail-open)
+ *   1. No Upstash creds → fetch direct from Finnhub every time (works, slow)
+ *   2. No Finnhub key → return all nulls (UI shows "—")
+ *   3. Finnhub 429/timeout → cache the null briefly so we don't hammer a
+ *      failing endpoint
+ *   4. Redis network blip → fall through to direct Finnhub (fail-open)
  *
- * Pricing intent: free-tier Polygon delivers 15-min delayed quotes; that's
- * fine for the at-a-glance "is this stock up or down today" surface. The
- * UI labels prices as "Delayed ~15min" so users don't expect tick-by-tick.
+ * Pricing intent: prices are real-time during market hours; on weekends and
+ * after-hours Finnhub returns the last regular-session quote. The UI labels
+ * them just "live" with a tooltip explaining the source.
  */
 
-const POLYGON_BASE = "https://api.polygon.io";
+const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
 /** Cache TTL — 5 minutes balances staleness vs Polygon quota. */
 const CACHE_TTL_SECONDS = 300;
@@ -32,8 +37,8 @@ const CACHE_TTL_SECONDS = 300;
 /** Short TTL on "tried Polygon, got null" so we don't hammer a failing ticker. */
 const NEGATIVE_CACHE_TTL_SECONDS = 60;
 
-/** Per-fetch timeout — page render shouldn't wait long on Polygon. */
-const POLYGON_TIMEOUT_MS = 2_000;
+/** Per-fetch timeout — page render shouldn't wait long on Finnhub. */
+const FINNHUB_TIMEOUT_MS = 2_000;
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -71,37 +76,50 @@ function cacheKey(ticker: string): string {
 }
 
 /**
- * Convert dotted class-share ticker (BRK.B) to the dash form Polygon
- * expects (BRK-B). Mirrors the same normalize step the Python pipeline
- * uses for Yahoo/SEC — Polygon shares the convention. Idempotent.
+ * Convert dotted class-share ticker (BRK.B) to the dash form most US-equity
+ * APIs expect (BRK-B). Mirrors the Python pipeline's normalization step.
+ * Finnhub accepts both forms but we normalize for consistency. Idempotent.
  */
-function toPolygonSymbol(ticker: string): string {
+function toApiSymbol(ticker: string): string {
   return ticker.toUpperCase().replaceAll(".", "-");
 }
 
 /**
- * Single-ticker fetch from Polygon's snapshot endpoint. Returns null when:
+ * Single-ticker fetch from Finnhub's `/quote` endpoint. Returns null when:
  *   - no API key configured
  *   - request times out (>2s)
- *   - Polygon returns non-2xx
- *   - response shape doesn't contain a finite number
+ *   - Finnhub returns non-2xx
+ *   - response is missing a finite current price (e.g. unknown ticker)
  *
  * Doesn't throw — the caller treats null as "fetch failed, cache briefly".
+ *
+ * Finnhub /quote response shape:
+ *   {
+ *     "c": 263.32,    // current price
+ *     "d": 3.98,      // change vs prev close (USD)
+ *     "dp": 1.5343,   // change % vs prev close
+ *     "h": 264.84,    // day high
+ *     "l": 260.05,    // day low
+ *     "o": 260.05,    // day open
+ *     "pc": 259.34,   // previous close
+ *     "t": 1779292260 // unix seconds of last update
+ *   }
+ *
+ * When a ticker is unknown or off-market, Finnhub returns all zeros — we
+ * treat `c === 0` as "no quote available" and surface null.
  */
-async function fetchSnapshot(ticker: string): Promise<{
+async function fetchQuote(ticker: string): Promise<{
   price: number | null;
   changePct: number | null;
 } | null> {
-  const apiKey = process.env.MASSIVE_API_KEY;
+  const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) return null;
 
-  const symbol = toPolygonSymbol(ticker);
-  const url =
-    `${POLYGON_BASE}/v3/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}` +
-    `?apiKey=${encodeURIComponent(apiKey)}`;
+  const symbol = toApiSymbol(ticker);
+  const url = `${FINNHUB_BASE}/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(apiKey)}`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), POLYGON_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), FINNHUB_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
@@ -111,39 +129,34 @@ async function fetchSnapshot(ticker: string): Promise<{
     });
     clearTimeout(timer);
     if (!res.ok) {
-      // 403 = ticker not on plan, 404 = unknown, 429 = rate-limited, 5xx = upstream
+      // 401 = bad/missing key, 429 = rate limit, 5xx = upstream
       console.warn(`[live-prices] ${symbol}: ${res.status} ${res.statusText}`);
       return { price: null, changePct: null };
     }
     const payload = (await res.json()) as {
-      ticker?: {
-        lastTrade?: { p?: number };
-        min?: { c?: number };
-        day?: { c?: number };
-        prevDay?: { c?: number };
-        todaysChangePerc?: number;
-      };
+      c?: number; // current price
+      dp?: number; // change percent
+      pc?: number; // previous close
     };
 
-    const t = payload.ticker;
-    // Prefer last trade for current price; fall back to minute-bar close,
-    // then day close — covers extended-hours, regular session, and EOD.
-    const rawPrice = t?.lastTrade?.p ?? t?.min?.c ?? t?.day?.c ?? null;
+    const rawPrice = typeof payload.c === "number" ? payload.c : null;
+    // Finnhub returns c=0 for unknown/off-market symbols rather than 404.
+    // Treat zero as missing data so we don't render "$0.00".
     const price =
-      typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : null;
+      rawPrice != null && Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : null;
 
-    // todaysChangePerc covers the common case. If absent, derive from
-    // current vs prevDay.c so we still show *something* useful.
+    // Prefer Finnhub's dp; fall back to deriving from c vs pc if dp is
+    // missing or null.
     let changePct: number | null = null;
-    if (typeof t?.todaysChangePerc === "number" && Number.isFinite(t.todaysChangePerc)) {
-      changePct = t.todaysChangePerc;
+    if (typeof payload.dp === "number" && Number.isFinite(payload.dp)) {
+      changePct = payload.dp;
     } else if (
       price != null &&
-      typeof t?.prevDay?.c === "number" &&
-      Number.isFinite(t.prevDay.c) &&
-      t.prevDay.c > 0
+      typeof payload.pc === "number" &&
+      Number.isFinite(payload.pc) &&
+      payload.pc > 0
     ) {
-      changePct = ((price - t.prevDay.c) / t.prevDay.c) * 100;
+      changePct = ((price - payload.pc) / payload.pc) * 100;
     }
 
     return { price, changePct };
@@ -200,7 +213,7 @@ export async function getLivePrices(tickers: string[]): Promise<Map<string, Live
   }
 
   if (misses.length > 0) {
-    const fetched = await Promise.allSettled(misses.map((t) => fetchSnapshot(t)));
+    const fetched = await Promise.allSettled(misses.map((t) => fetchQuote(t)));
     const now = Date.now();
     // Single pipeline write so N misses → 1 round-trip back to Redis.
     const writes: Array<{ key: string; value: CachedPrice; ttl: number }> = [];

@@ -109,7 +109,7 @@ export function StockCard({
                 <PriceChip pct={displayChangePct} suffix="today" />
                 <span
                   className="text-muted-foreground/60 text-[9px] tracking-wider uppercase"
-                  title="Polygon snapshot — 15-minute delayed quote"
+                  title="Finnhub real-time US equity quote, cached 5 min via Upstash"
                 >
                   · live
                 </span>

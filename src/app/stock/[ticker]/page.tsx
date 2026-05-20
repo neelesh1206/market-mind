@@ -218,9 +218,9 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           {livePrice?.price != null && (
             <p
               className="text-muted-foreground/70 text-[10px] tracking-wider uppercase"
-              title="Polygon free-tier snapshots are delayed by 15 minutes. Cached for 5 minutes via Upstash Redis."
+              title="Finnhub real-time US equity quote, cached 5 min via Upstash Redis to stay under rate limits."
             >
-              Live · ~15 min delayed
+              Live · Finnhub
             </p>
           )}
 
