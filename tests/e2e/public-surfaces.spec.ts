@@ -36,14 +36,11 @@ test.describe("public surfaces", () => {
     // Hero h1.
     await expect(page.getByRole("heading", { level: 1, name: /predictions you can audit/i })).toBeVisible();
 
-    // Track-record section heading. The section was renamed
-    // "Our track record" → "How we're doing" by the honest-accuracy-display
-    // change. Match either to avoid future copy churn flapping CI —
-    // what we actually care about is "the track-record surface renders",
-    // not the specific noun phrase.
-    await expect(
-      page.getByRole("heading", { name: /how we'?re doing|our track record/i }),
-    ).toBeVisible();
+    // Track-record section — target via `data-testid` rather than heading
+    // copy. Copy has changed once already ("Our track record" → "How we're
+    // doing") and will change again. The contract is "the section renders",
+    // not what it's called.
+    await expect(page.getByTestId("track-record-section")).toBeVisible();
 
     // The 4 signal bucket sections all render.
     await expect(page.getByRole("heading", { name: /^technical$/i })).toBeVisible();

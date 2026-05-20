@@ -91,8 +91,15 @@ export default async function AboutPage() {
           </p>
         </section>
 
-        {/* How we're doing — multi-window track record with honest framing */}
-        <section className="border-border/60 bg-card/30 space-y-4 rounded-xl border p-6">
+        {/* How we're doing — multi-window track record with honest framing.
+            `data-testid` is the e2e contract — Playwright targets this instead
+            of the heading copy so a future rename (this section has already
+            been renamed once: "Our track record" → "How we're doing") doesn't
+            flap CI. Don't remove without updating tests/e2e/public-surfaces.spec.ts. */}
+        <section
+          data-testid="track-record-section"
+          className="border-border/60 bg-card/30 space-y-4 rounded-xl border p-6"
+        >
           <header className="space-y-1.5">
             <h2 className="text-base font-semibold">How we&apos;re doing</h2>
             <p className="text-muted-foreground text-sm leading-relaxed">
