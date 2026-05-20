@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { SentryUserIdentifier } from "@/components/sentry-user-identifier";
+import { Analytics } from "@vercel/analytics/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -64,6 +65,10 @@ export default function RootLayout({
           <SentryUserIdentifier />
           <Toaster position="top-center" richColors />
         </ThemeProvider>
+        {/* Vercel Analytics — first-party pageview + Web Vitals tracking.
+            Free on Hobby (2,500 events/mo). No DSN needed; auto-detects the
+            Vercel deployment. Outside Vercel (local dev) it no-ops. */}
+        <Analytics />
       </body>
     </html>
   );
