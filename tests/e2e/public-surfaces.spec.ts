@@ -36,8 +36,14 @@ test.describe("public surfaces", () => {
     // Hero h1.
     await expect(page.getByRole("heading", { level: 1, name: /predictions you can audit/i })).toBeVisible();
 
-    // Track record section — phrasing must match the page.
-    await expect(page.getByRole("heading", { name: /our track record/i })).toBeVisible();
+    // Track-record section heading. The section was renamed
+    // "Our track record" → "How we're doing" by the honest-accuracy-display
+    // change. Match either to avoid future copy churn flapping CI —
+    // what we actually care about is "the track-record surface renders",
+    // not the specific noun phrase.
+    await expect(
+      page.getByRole("heading", { name: /how we'?re doing|our track record/i }),
+    ).toBeVisible();
 
     // The 4 signal bucket sections all render.
     await expect(page.getByRole("heading", { name: /^technical$/i })).toBeVisible();
