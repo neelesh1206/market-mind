@@ -14,6 +14,34 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 export const WEEKLY_REQUEST_LIMIT = 5;
 
+/**
+ * Minimum unique-user votes a request needs before it's eligible to be
+ * promoted into the active universe on Sunday's rotation.
+ *
+ * Mirrors the pipeline's `STOCK_ROTATION_MIN_VOTES` env var (default 3 in
+ * `.github/workflows/compute-stock-rotation.yml`). UI-only — Postgres /
+ * the rotation script remain the authoritative gate. Keep the value in
+ * sync if the env var ever changes.
+ */
+export const PROMOTION_VOTE_THRESHOLD = 3;
+
+/**
+ * Max number of stocks promoted (and demoted) in a single Sunday rotation,
+ * regardless of how many requests cleared the vote threshold.
+ *
+ * Mirrors `MAX_STOCK_ROTATION_SWAPS_PER_WEEK` in the rotation workflow.
+ * Surfaces in the UI explainer so users understand a 5th-place request
+ * with 3 votes may have to wait a week even if it qualifies.
+ */
+export const MAX_PROMOTIONS_PER_WEEK = 3;
+
+/**
+ * Minimum market cap (USD) for a ticker to be requestable. Mirrors
+ * `STOCK_REQUEST_MIN_MARKET_CAP_USD` in the workflow + the eligibility
+ * filter that backs `submit_stock_request`. UI uses this for explainer copy.
+ */
+export const MIN_MARKET_CAP_USD = 2_000_000_000;
+
 export type TopStockRequest = {
   ticker: string;
   companyName: string | null;

@@ -508,3 +508,104 @@ The original Phase 2 design from this ADR is now implemented.
 - **Sector backfill for "Uncategorized" promoted stocks** — could be
   done via a monthly cleanup job that hits Finnhub's industry-mapping
   endpoint.
+
+---
+
+## Amendment — Rotation safeguards (2026-05-20)
+
+The first end-to-end Sunday dry-run produced a concerning surface
+finding: **31 of 50 active stocks (62%)** were demotion-eligible
+under the original `zero_watchlists_and_no_bets_30d` filter, because
+the app's user base hasn't yet generated enough watchlist /
+prediction activity to "protect" most of the universe. With only one
+promotion candidate (HON, below the 3-vote threshold), the natural
+swap count was 0 this week — but a few weeks from now, with even a
+handful of promotion candidates clearing, a *single Sunday could
+swap out 30+ stocks at once*. That's a universe-collapse risk: the
+app would lose continuity for any user who'd been tracking those
+names.
+
+Three safeguards landed in one ship to keep rotation steady-state
+even under low activity:
+
+### A. `MAX_STOCK_ROTATION_SWAPS_PER_WEEK` cap (default 3)
+
+The natural swap count (`min(demotion_eligible, validated_promotions)`)
+is now further capped at this constant. With 50 stocks total, a cap
+of 3 means **at most 6% turnover per week**, which gives users time
+to notice and react to changes. Configurable via env so we can lift
+it once activity stabilizes.
+
+```python
+natural_swap_count = min(len(demotion_candidates), len(validated))
+swap_count = min(natural_swap_count, MAX_SWAPS_PER_WEEK)
+```
+
+### B. `STOCK_DEMOTION_BET_LOOKBACK_DAYS` widened 30 → 60
+
+The "no recent bets" gate is genuinely the part of the demotion
+criteria that goes brittle at low activity. A stock that hasn't
+been bet on in 30d isn't necessarily unloved — it may just be that
+nobody's bet on it *recently*. 60d strikes a balance: long enough
+to genuinely indicate disinterest, short enough that abandoned
+tickers still cycle out. Configurable, so we can tune as the data
+matures.
+
+### C. Demotion ordering: smallest market cap first
+
+User question that drove this: *"if we have more eligible stocks
+to be replaced and we have one stock request to be added, then we
+should remove the stock which has less market cap."*
+
+Among the "no users engage" pool, the safest stocks to drop are
+the smallest by market cap — they're least likely to be
+"discovered" by future users, and dropping a $5B name leaves more
+universe heft than dropping a $300B mega-cap. New constraint:
+
+```sql
+-- migration 20260520000007 — nullable; lazy-backfilled at rotation
+alter table stocks add column market_cap_usd bigint;
+```
+
+The rotation script sorts demotion candidates by `market_cap_usd
+ASC, ticker ASC`. For rows where `market_cap_usd` is NULL (the
+original 50 inserted before the column existed), Finnhub
+`/stock/profile2` is called at rotation time and the value
+persisted — so the first Sunday after this ships pays ~30s of
+extra HTTP for backfill and subsequent weeks read straight from
+the DB. Finnhub failures sort to last (uncertainty protects
+the candidate).
+
+### Net effect on the dry-run
+
+With the new defaults applied to today's state:
+- Demotion-eligible pool: **31 stocks** (lookback widened, but
+  still high because activity is genuinely low)
+- Promotion validated: **0** (HON has 1 vote, < 3 threshold)
+- Natural swap count: **0**
+- Capped swap count: **0**
+- Universe: **unchanged**
+
+Once HON crosses 3 votes (or any other request does), the cap
+ensures **at most 3 swaps per week** — and the smallest-cap
+demotion-eligible names will be the first to go.
+
+### Configuration recap
+
+```yaml
+# .github/workflows/compute-stock-rotation.yml
+STOCK_REQUEST_MIN_MARKET_CAP_USD: "2000000000"
+STOCK_ROTATION_MIN_VOTES: "3"
+MAX_STOCK_ROTATION_SWAPS_PER_WEEK: "3"   # NEW
+STOCK_DEMOTION_BET_LOOKBACK_DAYS: "60"   # NEW (was hardcoded 30)
+```
+
+### Files touched
+
+- `supabase/migrations/20260520000007_stocks_market_cap.sql` — new
+- `pipeline/supabase_client.py` — extended demotion helper, new
+  `update_stock_market_cap`
+- `pipeline/compute_stock_rotation.py` — cap, lookback, new
+  `_order_demotion_by_market_cap` helper, market_cap stored on
+  newly-promoted stocks
+- `.github/workflows/compute-stock-rotation.yml` — two new env vars

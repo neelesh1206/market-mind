@@ -34,8 +34,20 @@ CLI:
         #   (useful for smoke testing when you don't want a 30-min wait)
 
 Configurable via env:
-    STOCK_REQUEST_MIN_MARKET_CAP_USD — defaults $2B
-    STOCK_ROTATION_MIN_VOTES         — defaults 3
+    STOCK_REQUEST_MIN_MARKET_CAP_USD     — defaults $2B
+    STOCK_ROTATION_MIN_VOTES             — defaults 3
+    MAX_STOCK_ROTATION_SWAPS_PER_WEEK    — defaults 3 (universe-collapse safeguard)
+    STOCK_DEMOTION_BET_LOOKBACK_DAYS     — defaults 60 (was 30; lengthened so
+                                            fewer stocks meet the "no recent bets"
+                                            gate at low user activity)
+
+Demotion ordering — when there are more demotion-eligible stocks than
+promotion candidates, we demote the ones with the smallest market cap first.
+Rationale: among the "no users engage with this" pool, smaller-cap names are
+the safest to drop — they're least likely to be discovered by future users.
+The rotation lazy-backfills market_cap_usd for stocks added before the column
+existed, so the first Sunday after the migration pays an extra ~30s of
+Finnhub /profile2 calls and subsequent weeks read straight from the DB.
 """
 from __future__ import annotations
 
@@ -61,6 +73,7 @@ from .supabase_client import (
     record_rotation,
     set_stock_active,
     start_pipeline_run,
+    update_stock_market_cap,
 )
 
 log = logging.getLogger("marketmind.rotation")
@@ -68,6 +81,8 @@ log = logging.getLogger("marketmind.rotation")
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 MIN_MARKET_CAP_USD = int(os.getenv("STOCK_REQUEST_MIN_MARKET_CAP_USD", "2000000000"))
 MIN_VOTES = int(os.getenv("STOCK_ROTATION_MIN_VOTES", "3"))
+MAX_SWAPS_PER_WEEK = int(os.getenv("MAX_STOCK_ROTATION_SWAPS_PER_WEEK", "3"))
+BET_LOOKBACK_DAYS = int(os.getenv("STOCK_DEMOTION_BET_LOOKBACK_DAYS", "60"))
 
 
 def run(args: argparse.Namespace) -> int:
@@ -102,13 +117,22 @@ def run(args: argparse.Namespace) -> int:
     }
 
     try:
-        # Step 1 — demotion candidates
-        demotion_candidates = fetch_demotion_candidates(supabase)
+        # Step 1 — demotion candidates (eligibility filter only; ordering comes next)
+        demotion_candidates = fetch_demotion_candidates(
+            supabase, bet_lookback_days=BET_LOOKBACK_DAYS
+        )
         stats["demotion_candidates"] = len(demotion_candidates)
         log.info(
-            "rotation_demotion_candidates count=%s tickers=%s",
+            "rotation_demotion_candidates count=%s lookback_days=%s tickers=%s",
             len(demotion_candidates),
+            BET_LOOKBACK_DAYS,
             [s["ticker"] for s in demotion_candidates],
+        )
+
+        # Step 1b — order demotion candidates by market cap (smallest first).
+        # Lazy-backfills market_cap_usd for any candidate with NULL via Finnhub.
+        demotion_candidates = _order_demotion_by_market_cap(
+            supabase, demotion_candidates, finnhub_key, dry_run=args.dry_run,
         )
 
         # Step 2 — promotion candidates (raw, pre-validation)
@@ -129,15 +153,21 @@ def run(args: argparse.Namespace) -> int:
             [v["ticker"] for v in validated],
         )
 
-        # Step 4 — compute swap count (always-50 invariant)
-        swap_count = min(len(demotion_candidates), len(validated))
+        # Step 4 — compute swap count (always-50 invariant + per-week cap)
+        natural_swap_count = min(len(demotion_candidates), len(validated))
+        swap_count = min(natural_swap_count, MAX_SWAPS_PER_WEEK)
         log.info(
-            "rotation_swap_count count=%s "
+            "rotation_swap_count count=%s natural=%s cap=%s "
             "(demotion_eligible=%s validated_promotions=%s)",
-            swap_count,
-            len(demotion_candidates),
-            len(validated),
+            swap_count, natural_swap_count, MAX_SWAPS_PER_WEEK,
+            len(demotion_candidates), len(validated),
         )
+        if natural_swap_count > MAX_SWAPS_PER_WEEK:
+            log.info(
+                "rotation_capped capped_swaps=%s would_have_swapped=%s — "
+                "cap protects against universe-collapse on a single Sunday",
+                swap_count, natural_swap_count,
+            )
 
         if swap_count == 0:
             log.info(
@@ -154,12 +184,14 @@ def run(args: argparse.Namespace) -> int:
         to_demote = demotion_candidates[:swap_count]
         to_promote = validated[:swap_count]
 
+        demote_reason = f"zero_watchlists_and_no_bets_{BET_LOOKBACK_DAYS}d_lowest_mcap"
+
         # Step 5 — execute swaps
         if args.dry_run:
             for s in to_demote:
                 log.info(
-                    "dry_run_demote ticker=%s id=%s reason=zero_watchlists_and_no_bets_30d",
-                    s["ticker"], s["id"],
+                    "dry_run_demote ticker=%s id=%s market_cap=%s reason=%s",
+                    s["ticker"], s["id"], s.get("market_cap_usd"), demote_reason,
                 )
             for v in to_promote:
                 log.info(
@@ -177,10 +209,13 @@ def run(args: argparse.Namespace) -> int:
                 stock_id=s["id"],
                 ticker=s["ticker"],
                 action="demote",
-                reason="zero_watchlists_and_no_bets_30d",
+                reason=demote_reason,
             )
             stats["demoted"] += 1
-            log.info("rotation_demoted ticker=%s", s["ticker"])
+            log.info(
+                "rotation_demoted ticker=%s market_cap=%s",
+                s["ticker"], s.get("market_cap_usd"),
+            )
 
         for v in to_promote:
             new_row = insert_promoted_stock(
@@ -189,6 +224,7 @@ def run(args: argparse.Namespace) -> int:
                     "ticker": v["ticker"],
                     "name": v["company_name"],
                     "sector": v.get("sector") or "Uncategorized",
+                    "market_cap_usd": v["market_cap_usd"],
                     "is_active": True,
                 },
             )
@@ -234,6 +270,68 @@ def run(args: argparse.Namespace) -> int:
         )
     log.info("rotation_done %s", stats)
     return 0
+
+
+def _order_demotion_by_market_cap(
+    supabase: Any,
+    candidates: list[dict[str, Any]],
+    finnhub_key: str,
+    *,
+    dry_run: bool,
+) -> list[dict[str, Any]]:
+    """Sort demotion candidates by market_cap_usd ascending (smallest first).
+
+    Lazily backfills market_cap_usd for any row that's NULL (the original 50
+    stocks were inserted before the column existed). After first run, all
+    rows have a value and this is a no-op fetch.
+
+    Sort: market_cap_usd ASC, ticker ASC as a deterministic tiebreaker.
+    Candidates whose Finnhub lookup fails get a sentinel of `float('inf')`
+    so they sort LAST — uncertainty protects them from demotion.
+    """
+    needs_backfill = [c for c in candidates if c.get("market_cap_usd") is None]
+    if needs_backfill:
+        log.info(
+            "rotation_market_cap_backfill_start count=%s tickers=%s dry_run=%s",
+            len(needs_backfill),
+            [c["ticker"] for c in needs_backfill],
+            dry_run,
+        )
+        with httpx.Client(timeout=5.0, follow_redirects=True) as client:
+            for c in needs_backfill:
+                ticker = c["ticker"]
+                try:
+                    resp = client.get(
+                        f"{FINNHUB_BASE}/stock/profile2",
+                        params={"symbol": ticker, "token": finnhub_key},
+                    )
+                    resp.raise_for_status()
+                    profile = resp.json() or {}
+                    market_cap_mm = profile.get("marketCapitalization") or 0
+                    market_cap_usd = int(market_cap_mm * 1_000_000) if market_cap_mm else None
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "rotation_market_cap_backfill_failed ticker=%s err=%s",
+                        ticker, e,
+                    )
+                    market_cap_usd = None
+
+                c["market_cap_usd"] = market_cap_usd
+                if not dry_run and market_cap_usd is not None:
+                    update_stock_market_cap(
+                        supabase, stock_id=c["id"], market_cap_usd=market_cap_usd,
+                    )
+
+    def sort_key(c: dict[str, Any]) -> tuple[float, str]:
+        mc = c.get("market_cap_usd")
+        return (float(mc) if mc is not None else float("inf"), c["ticker"])
+
+    ordered = sorted(candidates, key=sort_key)
+    log.info(
+        "rotation_demotion_ordered_by_mcap (smallest first): %s",
+        [(c["ticker"], c.get("market_cap_usd")) for c in ordered],
+    )
+    return ordered
 
 
 def _validate_candidates(

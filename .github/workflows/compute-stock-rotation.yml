@@ -63,6 +63,12 @@ jobs:
 
       STOCK_REQUEST_MIN_MARKET_CAP_USD: "2000000000"
       STOCK_ROTATION_MIN_VOTES: "3"
+      # Safeguard A: cap swaps per week so a single Sunday can't collapse a
+      # large fraction of the universe at once. 3 == ~6% turnover/week ceiling.
+      MAX_STOCK_ROTATION_SWAPS_PER_WEEK: "3"
+      # Safeguard B: lengthen the "no recent bets" window from 30d → 60d so
+      # fewer stocks meet the demotion gate at low activity levels.
+      STOCK_DEMOTION_BET_LOOKBACK_DAYS: "60"
       PIPELINE_LOG_LEVEL: INFO
 
     steps:

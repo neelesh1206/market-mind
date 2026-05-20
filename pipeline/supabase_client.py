@@ -143,7 +143,7 @@ def complete_pipeline_run(
 
 
 def fetch_demotion_candidates(
-    client: Client, *, bet_lookback_days: int = 30
+    client: Client, *, bet_lookback_days: int = 60
 ) -> list[dict[str, Any]]:
     """Return active stocks eligible for demotion.
 
@@ -151,9 +151,10 @@ def fetch_demotion_candidates(
       - Zero rows in `user_watchlist` reference this stock_id
       - Zero rows in `predictions` reference this stock_id in last N days
 
-    Returns the full stock row (id, ticker, name, sector, sub_sector) so the
-    caller can record audit rows + decide ordering. Sorted by ticker for
-    deterministic output across runs (tests rely on this).
+    Returns each row's id, ticker, name, sector, sub_sector, market_cap_usd.
+    Sort order is NOT applied here — the rotation script decides ordering
+    (currently: lowest market cap first; NULL market caps sorted last so
+    they're protected from demotion until lazy-backfill fills them in).
     """
     # We can't easily express "NOT EXISTS" via the PostgREST builder, so
     # we pull all active stocks + the IDs that ARE referenced, then
@@ -161,7 +162,7 @@ def fetch_demotion_candidates(
     # negligible.
     active_res = (
         client.table("stocks")
-        .select("id, ticker, name, sector, sub_sector")
+        .select("id, ticker, name, sector, sub_sector, market_cap_usd")
         .eq("is_active", True)
         .order("ticker")
         .execute()
@@ -193,6 +194,17 @@ def fetch_demotion_candidates(
         if s["id"] not in watched_ids and s["id"] not in recently_bet_ids
     ]
     return eligible
+
+
+def update_stock_market_cap(
+    client: Client, *, stock_id: str, market_cap_usd: int | None
+) -> None:
+    """Lazy backfill — set market_cap_usd on a stocks row. Called by the
+    rotation script after fetching a stock's market cap from Finnhub. Future
+    rotations read this value directly without re-fetching."""
+    client.table("stocks").update(
+        {"market_cap_usd": market_cap_usd}
+    ).eq("id", stock_id).execute()
 
 
 def fetch_promotion_candidates(
