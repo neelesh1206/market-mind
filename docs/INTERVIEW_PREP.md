@@ -50,9 +50,9 @@
 > autonomously on a $38/month budget across five free-tier services.
 >
 > I built it as a portfolio piece to show I can ship a full-stack product —
-> not a tutorial clone — with real engineering discipline: 18 ADRs, 14
+> not a tutorial clone — with real engineering discipline: 17 ADRs, 15
 > migrations, end-to-end type safety, RLS at the database layer, and
-> 68 unit + 7 e2e + 20 pipeline tests gating CI.
+> 88 JS unit + 7 e2e + ~40 Python pipeline tests gating CI on ~16k LOC.
 
 **Memorize the bolded numbers.** They're the proof points interviewers respond to.
 
@@ -76,7 +76,9 @@ If someone says "walk me through this project":
 >
 > 7. **The infrastructure.** Five free-tier services tied together: Vercel for hosting, Supabase for Postgres + Auth + RLS, GitHub Actions for the pipeline runtime, Cloudflare Workers for the cron triggers (more reliable than GH Actions cron, which can drift hours), and Upstash Redis for shared caching of rate limits and live prices. Sentry catches errors. Vercel Analytics tracks Web Vitals.
 >
-> 8. **The interesting decisions.** Eighteen ADRs walk through them. The ones I'd flag for an engineering interview: choosing Supabase over Neon for the auth-included story, moving FinBERT to local execution after watching HF rate limits kill a production run, switching the social bucket from amplifying to damping retail attention, and most recently re-thinking how mid-day bets resolve so a 12:30 PM bettor isn't held to the same bar as someone who bet the previous night.
+> 8. **The interesting decisions.** Seventeen ADRs walk through them. The ones I'd flag for an engineering interview: choosing Supabase over Neon for the auth-included story, moving FinBERT to local execution after watching HF rate limits kill a production run, switching the social bucket from amplifying to damping retail attention, and most recently re-thinking how mid-day bets resolve so a 12:30 PM bettor isn't held to the same bar as someone who bet the previous night.
+>
+> 9. **Trust-building UX.** Three concrete moves: I publish accuracy with the 95% Wilson confidence interval (sample-size honesty), the NEUTRAL chip is visually distinct from UP/DOWN so users see "we deliberately didn't make a call" instead of mistaking it for a wishy-washy third tone, and every verdict carries a thumbs-up/thumbs-down feedback widget so I can close the loop on which calls were actually useful — aggregate "X of Y people found this helpful" is public, individual votes are RLS-scoped to the voter.
 
 That's about 90 seconds. Add or trim depending on the interviewer's attention.
 
@@ -208,6 +210,9 @@ Zero. No Redux, no Zustand, no React Query. Server-side fetches go through RSC, 
 - **`MarketScheduleBar`** — state machine UI. Three states: "pipeline running," "bet window open," "market closed, results soon." Drives all the time-sensitive copy on the home page.
 - **`TrackRecordBadge`** — accuracy + Wilson CI in one inline component. Tooltip explains the math. `compact` prop strips it down for in-card use.
 - **`ConvictionList`** — top 5 long + top 5 short by cross-sectional rank. Stars indicate stocks already on the user's watchlist (discovery + personalized context in one surface).
+- **`VerdictChip`** — three visually distinct states. UP and DOWN render as solid colored chips with a confidence percentage; NEUTRAL renders as a dashed-border transparent chip with a HelpCircle icon and explicit "no clear read today" copy (no percentage shown). The visual distinction matters because a NEUTRAL with confidence numbers reads as "mildly indecisive" — actually it means "we deliberately did not make a call, signals were mixed." UX honesty in the smallest atomic component.
+- **`PredictionFeedback`** — thumbs-up / thumbs-down on each MarketMind verdict on the stock detail page. Three display modes by sample size: `N=0` → "Be the first to weigh in"; `N<5` → "X of Y people found this helpful" (no percentage, avoiding the 1/1=100% misleading display); `N≥5` → percentage shown. Anon visitors see the aggregate count + a sign-in CTA but can't vote. Optimistic UI with state-restore on RPC failure. Closes the feedback loop on verdict quality without a separate analytics tool.
+- **Stuck-bet UI** (`isStuckPrediction` helper) — purely UI-derived state for bets whose `prediction_date < today_et AND !resolved`. Covers cron failures, weekend bets, price-data hiccups. Surfaces on three places: amber banner on `/bets` history page, "Delayed" badge variant on each affected row, and the home-page chip swaps "Resolves in 3h" copy for "Resolution delayed" with an `AlertCircle` icon. No schema, no cron, no auto-VOID — pure UI derivation makes silent failures visible instead of leaving users wondering why their stake hasn't resolved.
 
 ### Mobile-first
 
@@ -433,7 +438,18 @@ We can't run a 7B-param model on a free CI runner, so this stays on HF Inference
 
 Self-healing: a single successful call resets the counter. A transient wobble doesn't permanently disable the LLM path.
 
-**Interview talking point:** *"NLP gracefully degrades. Sentiment is the only AI-dependent bucket, and even there we have FinBERT running locally as the primary path — the LLM-via-HF is reasoning text on top of computed scores. If HuggingFace is completely down, users see verdicts with rule-based reasoning instead of LLM-polished prose. The math is unchanged."*
+### Richer rule-based fallback reasoning
+
+The fallback isn't generic. Each bucket has a `_describe_*` helper in `pipeline/processors/verdict.py` that turns the underlying signal data into a concrete phrase:
+
+- *"12 of 14 analysts rate Buy, recent upgrade"* — from `breakdown.professional`
+- *"oversold RSI, MACD bullish crossover"* — from `breakdown.technical`
+- *"news positive 8 / negative 2"* — from `breakdown.sentiment`
+- *"high herding intensity, damped social signal"* — from `breakdown.social`
+
+So a NEUTRAL verdict with LLM down still produces *"Mixed — 10 of 14 analysts rate Buy pulling up, overbought RSI pulling down. No clear read."* — instead of the older generic *"Bullish — driven primarily by professional and technical signals."* Backwards compatible: callers without a breakdown attached fall through to the old name-based phrasing.
+
+**Interview talking point:** *"NLP gracefully degrades. Sentiment is the only AI-dependent bucket, and even there FinBERT runs locally as the primary path — the LLM-via-HF is reasoning text on top of already-computed scores. If HuggingFace is completely down, users see verdicts with rule-based reasoning that's still specific and useful — '12 of 14 analysts rate Buy, oversold RSI, MACD bullish crossover' — not just 'driven by professional and technical.' The math is unchanged."*
 
 ---
 
@@ -549,9 +565,9 @@ Manual: `npx wrangler deploy` from `workers/cron-trigger/`. Doesn't change often
 
 | Layer | Tool | Count | What it locks in |
 |---|---|---|---|
-| **Frontend unit** | Vitest + jsdom | ~80 | Pure helpers — market schedule, verdict computation, bet math, badges, bonus math, live-price cache, Wilson interval |
+| **Frontend unit** | Vitest + jsdom | 88 (9 files) | Pure helpers — market schedule, verdict computation, bet math (incl. resolution-mode mirroring), badges, bonus math, live-price cache, Wilson interval, prediction-feedback RPC mapping |
 | **Frontend e2e** | Playwright | 7 | Public-surface smoke (login, about, og/og-404, anon stock detail, skip-link first tab, custom-domain reachability) |
-| **Pipeline unit** | pytest | ~50 (across 6 files) | Verdict scoring, social bucket, ranking, ticker normalization, resolution-mode discriminator (incl. DST boundaries) |
+| **Pipeline unit** | pytest | ~40 (6 files) | Verdict scoring (incl. richer fallback reasoning), social bucket fade-the-crowd, cross-sectional ranking, ticker normalization (BRK.B → BRK-B), resolution-mode discriminator (incl. DST boundaries) |
 
 ### Coverage gates
 

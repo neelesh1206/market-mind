@@ -4,7 +4,7 @@
 
 ## 30-second pitch
 
-Daily stock-prediction game with a transparent signal engine. Python pipeline visits **10 data sources** for **50 stocks** nightly, scores each into **4 buckets** (technical, sentiment, professional, social), computes UP/DOWN/NEUTRAL with a one-sentence Llama-generated explanation. Users place virtual-credit bets, resolved against actual market close. **80 unit + 7 e2e + 20 pipeline tests**, **18 ADRs**, **15 migrations**, all running for **$38/month**.
+Daily stock-prediction game with a transparent signal engine. Python pipeline visits **10 data sources** for **50 stocks** nightly, scores each into **4 buckets** (technical, sentiment, professional, social), computes UP/DOWN/NEUTRAL with a one-sentence Llama-generated explanation. Users place virtual-credit bets, resolved against actual market close. **88 JS unit + 7 e2e + ~40 Python tests**, **17 ADRs**, **15 migrations**, **~16k LOC**, all running for **$38/month**.
 
 ## Architecture (one breath)
 
@@ -41,6 +41,12 @@ Daily stock-prediction game with a transparent signal engine. Python pipeline vi
 - **GH Actions cron drift.** Assumed schedules fired on time. ~3h late on first run. Moved to Cloudflare Worker.
 - **MarketMind verdict window.** Originally scored `open → close`; verdict was frozen 8 PM previous day so this discarded the overnight gap. Fixed to `prev_close → close`. **Lesson:** scoring window matches *prediction-decision time*, not bet-locking time.
 
+## Three honesty / UX moves worth mentioning
+
+- **95% Wilson CI** next to every accuracy number. Sample-size-aware copy: <30 = "wide on purpose", <100 = "still wide", ≥100 = "narrowed enough to be defensible". Per-stock track record under each verdict.
+- **NEUTRAL chip visually distinct** (dashed border, HelpCircle icon, no percentage) — reads as "we deliberately didn't call this," not "mildly indecisive." Companion fallback copy: "Signals are pointing in different directions — better to skip than call a coin flip."
+- **Thumbs-up/down feedback on every verdict.** Optimistic UI; aggregate "X of Y found helpful" is public; individual votes RLS-scoped. Sample-size-aware display (<5 = no percentage shown to avoid 1/1=100% misleading).
+
 ## End-to-end feature: bet placement
 
 `BetSheet` (client) → `placeBet` server action → `rateLimit("placeBet", userId)` → `supabase.rpc("place_bet", {...})` → atomic txn: validate balance, lock bet row, insert ledger entry, award `FIRST_BET` if total_after=1 → return prediction → `revalidatePath("/")` → home feed RSC re-renders with locked-in chip → Sonner toast w/ smart-formatted resolution time. **Live price (Finnhub via Upstash) captured into `price_at_placement` for later display + ADR 0017 resolution math.**
@@ -59,7 +65,7 @@ Daily stock-prediction game with a transparent signal engine. Python pipeline vi
 
 ## Numbers to drop naturally
 
-50 stocks · 10 data sources · 4 signal buckets · 1.8× payout · 95% Wilson CI · 18 ADRs · 15 migrations · ~11.6k LOC · ~80/7/20 tests · $38/mo · 5min Upstash TTL · 60/min Finnhub free · ~15-25 min pipeline runtime · ~80 LOC Cloudflare Worker.
+50 stocks · 10 data sources · 4 signal buckets · 1.8× payout · 95% Wilson CI · 17 ADRs · 15 migrations · ~16k LOC · 88/7/~40 tests · $38/mo · 5min Upstash TTL · 60/min Finnhub free · ~15-25 min pipeline runtime · ~80 LOC Cloudflare Worker.
 
 ## Cost breakdown ($38/mo)
 
