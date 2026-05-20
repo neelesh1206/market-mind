@@ -12,10 +12,17 @@ import type { TickerSearchResult } from "@/lib/ticker-search";
 import type { TopStockRequest } from "@/lib/stock-requests";
 import { TickerSearchInput } from "@/components/ticker-search-input";
 
+/** Soft + hard weekly limit on unique-ticker requests per user. Matches
+ *  the constant in src/app/actions/stock-requests.ts and the RPC's
+ *  enforcement. */
+export const WEEKLY_REQUEST_LIMIT = 5;
+
 type Props = {
   topRequests: TopStockRequest[];
   /** Tickers the current user has voted for (already-requested set). */
   userVotes: string[];
+  /** How many unique-ticker requests this user has made in the last 7d. */
+  weeklyUsed: number;
 };
 
 /**
@@ -28,10 +35,18 @@ type Props = {
  *
  * Each mutation rolls back on RPC failure via state-restore + sonner toast.
  */
-export function StockRequestPanel({ topRequests, userVotes }: Props) {
+export function StockRequestPanel({
+  topRequests,
+  userVotes,
+  weeklyUsed,
+}: Props) {
   const [requests, setRequests] = useState<TopStockRequest[]>(topRequests);
   const [votes, setVotes] = useState<Set<string>>(new Set(userVotes));
+  // Local counter for the badge. Bumps optimistically on a new request,
+  // rolls back if the server rejects. The RPC is the authoritative gate.
+  const [used, setUsed] = useState<number>(weeklyUsed);
   const [isPending, startTransition] = useTransition();
+  const limitReached = used >= WEEKLY_REQUEST_LIMIT;
 
   // ---------------------------------------------------------------------------
   // Submit a new request (from the search dropdown)
@@ -42,12 +57,22 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
       toast.info(`${result.ticker} is already on your list.`);
       return;
     }
+    // Hit the local weekly limit? RPC would reject anyway, but bail
+    // optimistically so the UI doesn't briefly flash the row in.
+    if (limitReached) {
+      toast.error(
+        `You've used your ${WEEKLY_REQUEST_LIMIT} requests for this week.`,
+      );
+      return;
+    }
 
     // Optimistic — add the row and vote, undo if the server rejects.
     const previousRequests = requests;
     const previousVotes = votes;
+    const previousUsed = used;
 
     setVotes((s) => new Set([...s, result.ticker]));
+    setUsed(used + 1);  // new ticker → counts against the weekly budget
     const existing = requests.find((r) => r.ticker === result.ticker);
     if (existing) {
       setRequests(requests.map((r) =>
@@ -72,6 +97,7 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
       if (!out.ok) {
         setRequests(previousRequests);
         setVotes(previousVotes);
+        setUsed(previousUsed);
         toast.error(out.error);
       } else {
         toast.success(`${out.ticker} added to the request list.`);
@@ -85,11 +111,15 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
   function handleToggleVote(ticker: string, currentlyVoted: boolean) {
     const previousRequests = requests;
     const previousVotes = votes;
+    const previousUsed = used;
 
     if (currentlyVoted) {
       // Remove vote — drop count by 1; if it hits zero we still leave the
       // row visible until the server confirms (revalidatePath will refresh
-      // the page and clean up).
+      // the page and clean up). The weekly counter does NOT decrement
+      // here because the rolling window is based on `created_at` of the
+      // original request, which gets deleted; the count will accurately
+      // re-render on next page load via fetchUserWeeklyRequestCount.
       setVotes((s) => {
         const next = new Set(s);
         next.delete(ticker);
@@ -99,7 +129,19 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
         r.ticker === ticker ? { ...r, voteCount: Math.max(0, r.voteCount - 1) } : r,
       ));
     } else {
+      // Re-vote on existing row. RPC counts this as a new unique-ticker
+      // request only if the user had previously removed their vote; if
+      // they're toggling for the first time on someone else's row, the
+      // RPC enforces the 5/week. Bail optimistically if locally we're
+      // at the limit.
+      if (limitReached) {
+        toast.error(
+          `You've used your ${WEEKLY_REQUEST_LIMIT} requests for this week.`,
+        );
+        return;
+      }
       setVotes((s) => new Set([...s, ticker]));
+      setUsed(used + 1);
       setRequests(requests.map((r) =>
         r.ticker === ticker ? { ...r, voteCount: r.voteCount + 1 } : r,
       ));
@@ -112,6 +154,7 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
       if (!out.ok) {
         setRequests(previousRequests);
         setVotes(previousVotes);
+        setUsed(previousUsed);
         toast.error(out.error);
       }
     });
@@ -124,21 +167,39 @@ export function StockRequestPanel({ topRequests, userVotes }: Props) {
     <div className="space-y-8">
       {/* Search + submit */}
       <section className="space-y-3">
-        <header className="space-y-1">
-          <h2 className="text-base font-semibold">Submit a request</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Type a ticker or company name. We only allow US-listed common stocks at or above
-            $2B market cap — the search will filter the rest out for you.
-          </p>
+        <header className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold">Submit a request</h2>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Type a ticker or company name. We only allow US-listed common stocks at or above
+              $2B market cap — the search will filter the rest out for you.
+            </p>
+          </div>
+          {/* Weekly budget badge — separate visual treatment when limit is reached. */}
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium tabular-nums",
+              limitReached
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border/60 bg-card/40 text-muted-foreground",
+            )}
+            title="Each user can request 5 unique tickers per rolling 7-day window."
+          >
+            {used} of {WEEKLY_REQUEST_LIMIT} weekly requests used
+          </span>
         </header>
         <TickerSearchInput
           onPick={handlePick}
-          disabled={isPending}
+          disabled={isPending || limitReached}
           threshold="top 2000 by market cap"
         />
-        {isPending && (
-          <p className="text-muted-foreground text-xs">Submitting…</p>
+        {limitReached && !isPending && (
+          <p className="text-amber-600 dark:text-amber-400 text-xs">
+            Weekly limit reached. Your oldest request ages out 7 days after you made it; budget
+            recovers automatically as that happens.
+          </p>
         )}
+        {isPending && <p className="text-muted-foreground text-xs">Submitting…</p>}
       </section>
 
       {/* Listing */}

@@ -191,3 +191,141 @@ Phase 1 ships with this ADR. Phase 2 (the actual rotation pipeline +
 Sunday closure) is the next signal-side commit. The schema + UI shipped
 here are designed against the Phase 2 contract; nothing in Phase 1 will
 need to change when Phase 2 lands.
+
+---
+
+## 2026-05-20 amendment — pre-loaded universe + 5/week limit + Postgres-backed search
+
+The original Phase 1 implementation called Finnhub `/search` + `/profile2`
+per user request (with a 1h/24h Redis cache). It worked, but raised
+two concerns:
+
+1. **Shared quota with live prices.** Live prices also use Finnhub
+   (60 calls/min free tier). Putting search on the same quota means
+   a search burst can starve live prices, or vice versa.
+2. **Cold cache + cold start tax.** A new Vercel function instance
+   on a fresh Redis cache pays a Finnhub round-trip per keystroke.
+
+The senior-engineering pattern is to **separate the data-acquisition
+concern from the data-serving concern.** Acquisition is slow,
+external-dependency-heavy, runs on a schedule. Serving is fast,
+internal-only, runs per-request. Acquired data lives in your own
+storage in between.
+
+### Pre-loaded universe table
+
+New `universe_eligible_stocks` (Postgres) table — the source of truth
+for "what can be requested." Schema:
+
+```sql
+ticker          text primary key,
+company_name    text not null,
+exchange        text,
+market_cap_usd  bigint not null,
+refreshed_at    timestamptz not null default now()
+```
+
+Three indexes — primary key on `ticker`, `text_pattern_ops` on ticker
+for prefix matching, `text_pattern_ops` on `lower(company_name)` for
+case-insensitive substring matching, and a sort-friendly index on
+`market_cap_usd desc`. Public-read RLS so anon visitors can search.
+
+### Why Postgres and not Redis
+
+Search is multi-attribute filtering with relevance scoring:
+
+```
+WHERE ticker LIKE 'X%' OR company_name ILIKE '%x%'
+ORDER BY (exact_match, prefix_match, contains_match), market_cap DESC
+LIMIT 15
+```
+
+In SQL this is one indexed query, sub-millisecond at 2000 rows. In
+Redis it would mean loading a 200KB JSON blob into a Vercel function's
+memory and filtering in JS on every search — same wall-clock latency
+but harder to evolve (add `sector`, `country` later → app code change)
+and impossible to join with other relational data (Phase 2 rotation
+needs `stock_requests JOIN universe_eligible_stocks`).
+
+The general principle: **single-key TTL'd lookups → Redis; multi-
+attribute filtered queries → Postgres.** Live prices (`mm:price:<TICKER>`)
+and rate-limit counters stay in Redis where they belong; this data
+moves to Postgres where it belongs.
+
+### Refresh pipeline
+
+`pipeline/refresh_eligible_universe.py` runs weekly:
+
+1. Pull all US-listed common stocks via Finnhub `/stock/symbol`
+   (1 call, ~12K tickers)
+2. For each, fetch `/stock/profile2` at 1.1s pacing (≈55 calls/min,
+   safely under the 60/min limit)
+3. Filter to market cap ≥ $2B; collect ~2000 eligible rows
+4. Bulk upsert into `universe_eligible_stocks` in 200-row chunks
+5. Delete rows that aren't in the current run (handles tickers
+   falling below the threshold week-over-week)
+
+Bootstrap (first run): ~3h 20m at the pacing rate. Steady-state weekly
+runs are ~30-45 min since we mostly re-verify market caps for already-
+eligible tickers.
+
+Schedule: Sunday 04:00 UTC via the Cloudflare Worker cron (ADR 0016).
+That's ~midnight Sunday ET — 8 hours before the Phase 2 rotation
+pipeline (still pending) needs the data.
+
+### 5-per-week request limit
+
+Per-user rolling 7-day cap on **unique-ticker** requests. Three
+properties matter:
+
+1. **Rolling window, not calendar week.** Calendar resets create
+   weird UX ("can I request? oh wait it's Sunday 11:58 PM...").
+   Rolling: your oldest in-window request ages out and the budget
+   regrows naturally.
+2. **Re-vote doesn't count.** Re-clicking "I want this" on a stock
+   you've already voted for is idempotent — the upsert is a no-op,
+   and the limit only triggers on new (user, ticker) pairs.
+3. **Defense in depth.** UI shows "3 of 5 used this week" near the
+   search box and disables submit at 5/5. Server action checks the
+   count for fast feedback. RPC enforces it as the authoritative
+   gate (can't be bypassed via direct DB writes).
+
+### What changes in the user-facing experience
+
+- The "Request to be added" tab on `/stocks` now shows a "3 of 5
+  weekly requests used" badge next to the search box.
+- Once you hit the limit, the search input is disabled and a small
+  amber explanation appears. As your oldest request ages past 7 days,
+  the count drops and the input re-enables — automatically, no action
+  needed.
+- Search itself is now faster (no Finnhub round-trip) and works during
+  Finnhub outages.
+
+### What stops working between migration apply and first refresh
+
+The table is empty until the first refresh job populates it. Until
+then:
+- Search returns no results (UI shows "No matches").
+- Submit is blocked by the `ticker_not_eligible` check in the RPC.
+
+**Bootstrap procedure**: apply the migration, then immediately trigger
+the `refresh-eligible-universe.yml` workflow via `workflow_dispatch`
+on GitHub Actions. The first run takes ~3h 20m. After that, weekly
+cron handles it.
+
+### Trade-offs accepted
+
+- **Up to 7 days stale market cap.** A stock that drops from $2.5B
+  to $1.8B mid-week stays requestable until Sunday's refresh removes
+  it. For "is this a real public company worth tracking" gating,
+  this resolution is fine — we're not running a high-frequency
+  rebalance.
+- **3h 20m bootstrap.** One-time cost. Could be sped up by parallelizing
+  the per-ticker `/profile2` calls (we currently serialize for rate
+  limit safety), but the marginal benefit isn't worth the rate-limit
+  risk.
+- **Search returns nothing if the refresh ever fully fails.** The
+  table is the source of truth; if we somehow blank it out, no search
+  works. The refresh job has a "skip delete if zero current rows"
+  guard to prevent the most catastrophic failure mode (Finnhub returns
+  nothing → we don't delete everything thinking the universe collapsed).

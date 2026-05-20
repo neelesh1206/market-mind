@@ -9,6 +9,9 @@ import {
   type TickerSearchResult,
 } from "@/lib/ticker-search";
 
+/** Soft limit — also enforced in the RPC. UI displays "X of 5 used". */
+export const WEEKLY_REQUEST_LIMIT = 5;
+
 // =============================================================================
 // Submit a stock request.
 // =============================================================================
@@ -23,17 +26,19 @@ export type SubmitRequestResult =
   | { ok: false; error: string };
 
 /**
- * Validate + submit a stock request.
+ * Validate + submit a stock request. See ADR 0018 for the architecture.
  *
- * Validation chain (in order; first failure short-circuits):
+ * Validation chain:
  *   1. Auth — caller must be signed in
- *   2. Rate limit — 10/min per user
- *   3. Finnhub validation — ticker exists, US-listed, market cap >= threshold
- *   4. Already in universe — reject if the ticker is currently active in `stocks`
- *   5. RPC — idempotent upsert on (user_id, ticker)
+ *   2. Soft rate limit — 10 ops/min per user (Redis sliding window)
+ *   3. Postgres validation — ticker is in `universe_eligible_stocks`
+ *   4. RPC submit — enforces (a) ticker not in active universe, (b)
+ *      ticker in eligibility table, (c) 5-unique-tickers-per-7d limit
+ *      (only against genuinely NEW tickers; re-vote is exempt)
  *
- * Returns a tagged-result so the client can surface the specific failure
- * mode (market cap too low needs different copy than "not a real ticker").
+ * Specific RPC errors are mapped to user copy here. The RPC raises with
+ * named tags (`ticker_not_eligible`, `weekly_limit_reached`, etc.) so this
+ * mapping is unambiguous.
  */
 export async function submitStockRequest(
   rawTicker: string,
@@ -51,61 +56,63 @@ export async function submitStockRequest(
     return { ok: false, error: `Slow down — try again in ${rl.retryAfter}s.` };
   }
 
-  // Step 1: Finnhub validation (network call, takes ~250ms)
-  const validation = await validateTickerForRequest(rawTicker);
+  // Postgres-side validation. Fast — no network call.
+  const validation = await validateTickerForRequest(supabase, rawTicker);
   if (!validation.ok) {
-    switch (validation.reason) {
-      case "invalid_ticker":
-        return { ok: false, error: "Couldn't find that ticker on a US exchange." };
-      case "not_us_listed":
-        return { ok: false, error: "MarketMind only covers US-listed equities." };
-      case "market_cap_too_low": {
-        const billionUsd = (validation.threshold / 1_000_000_000).toFixed(0);
-        return {
-          ok: false,
-          error: `Below our market-cap threshold (we accept ≥ $${billionUsd}B). This keeps the request list focused on liquid, broadly-followed names.`,
-        };
-      }
-      case "profile_unavailable":
-        return { ok: false, error: "Couldn't reach our data provider. Try again in a moment." };
+    if (validation.reason === "not_eligible") {
+      return {
+        ok: false,
+        error: `${rawTicker.toUpperCase()} isn't in our eligibility list (top ~2000 US equities by market cap). The list refreshes weekly.`,
+      };
     }
-  }
-
-  // Step 2: already-in-universe check (Supabase round-trip)
-  const { data: existing } = await supabase
-    .from("stocks")
-    .select("ticker")
-    .ilike("ticker", validation.ticker)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (existing) {
     return {
       ok: false,
-      error: `${validation.ticker} is already in MarketMind's universe.`,
+      error: "Couldn't validate this ticker right now. Try again in a moment.",
     };
   }
 
-  // Step 3: idempotent RPC upsert
+  // Submit via RPC. The RPC re-validates eligibility, enforces the
+  // already-in-universe guard, and enforces the weekly limit.
   const { error: rpcErr } = await supabase.rpc("submit_stock_request", {
     p_ticker: validation.ticker,
     p_company_name: validation.companyName,
     p_market_cap: validation.marketCapUsd,
   });
+
   if (rpcErr) {
     console.error("[stock-requests] submit_stock_request failed:", rpcErr);
-    if (rpcErr.message.includes("already_in_universe")) {
-      return { ok: false, error: `${validation.ticker} is already in MarketMind's universe.` };
+    const msg = rpcErr.message.toLowerCase();
+    if (msg.includes("already_in_universe")) {
+      return {
+        ok: false,
+        error: `${validation.ticker} is already in MarketMind's universe.`,
+      };
+    }
+    if (msg.includes("ticker_not_eligible")) {
+      return {
+        ok: false,
+        error: `${validation.ticker} isn't in our eligibility list (top ~2000 US equities by market cap).`,
+      };
+    }
+    if (msg.includes("weekly_limit_reached")) {
+      return {
+        ok: false,
+        error: `You've used your ${WEEKLY_REQUEST_LIMIT} requests for this week. The oldest one ages out 7 days after you made it.`,
+      };
     }
     if (
       rpcErr.code === "PGRST202" ||
-      (rpcErr.message.includes("function") && rpcErr.message.includes("does not exist"))
+      (msg.includes("function") && msg.includes("does not exist"))
     ) {
-      return { ok: false, error: "Stock requests aren't enabled on the server yet (migration pending)." };
+      return {
+        ok: false,
+        error: "Stock requests aren't enabled on the server yet (migration pending).",
+      };
     }
     return { ok: false, error: "Couldn't save the request. Try again?" };
   }
 
-  revalidatePath("/requests");
+  revalidatePath("/stocks");
   return {
     ok: true,
     ticker: validation.ticker,
@@ -115,7 +122,7 @@ export async function submitStockRequest(
 }
 
 // =============================================================================
-// Remove a previously-cast vote.
+// Remove a previously-cast vote. Unchanged from prior implementation.
 // =============================================================================
 
 export type RemoveRequestResult = { ok: true } | { ok: false; error: string };
@@ -141,20 +148,17 @@ export async function removeStockRequest(
     console.error("[stock-requests] remove_stock_request failed:", error);
     return { ok: false, error: "Couldn't remove the vote. Try again?" };
   }
-  revalidatePath("/requests");
+  revalidatePath("/stocks");
   return { ok: true };
 }
 
 // =============================================================================
-// Search action — wraps the lib helper so it can be invoked from a client
-// component. The lib helper itself doesn't have "use server" so we can't call
-// it directly from the browser; this is the thin RPC layer.
+// Search action — wraps the lib helper to be invokable from a client component.
 // =============================================================================
 
 export async function searchTickersAction(
   query: string,
 ): Promise<TickerSearchResult[]> {
-  // Search is read-only and idempotent; no auth gate. Anyone can use the
-  // autocomplete. The submit endpoint requires auth + does the heavy lifting.
-  return searchTickers(query);
+  const supabase = await createClient();
+  return searchTickers(supabase, query);
 }

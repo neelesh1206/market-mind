@@ -3,7 +3,11 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllStocks, fetchUserWatchlist, WATCHLIST_MAX } from "@/lib/watchlist";
-import { fetchTopStockRequests, fetchUserStockRequests } from "@/lib/stock-requests";
+import {
+  fetchTopStockRequests,
+  fetchUserStockRequests,
+  fetchUserWeeklyRequestCount,
+} from "@/lib/stock-requests";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StockBrowser } from "@/components/stock-browser";
@@ -30,7 +34,14 @@ export default async function StocksPage() {
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
 
-  const [allStocks, watchlist, profileRes, topRequests, userVotes] = await Promise.all([
+  const [
+    allStocks,
+    watchlist,
+    profileRes,
+    topRequests,
+    userVotes,
+    weeklyUsed,
+  ] = await Promise.all([
     fetchAllStocks(supabase),
     fetchUserWatchlist(supabase, userId),
     supabase
@@ -40,6 +51,7 @@ export default async function StocksPage() {
       .maybeSingle(),
     fetchTopStockRequests(supabase, 100),
     fetchUserStockRequests(supabase, userId),
+    fetchUserWeeklyRequestCount(supabase),
   ]);
 
   const profile = profileRes.data;
@@ -116,6 +128,7 @@ export default async function StocksPage() {
             <StockRequestPanel
               topRequests={topRequests}
               userVotes={Array.from(userVotes)}
+              weeklyUsed={weeklyUsed}
             />
           </TabsContent>
         </Tabs>

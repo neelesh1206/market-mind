@@ -50,6 +50,10 @@ const CRON_TO_WORKFLOW: Record<string, string> = {
   // accuracy into the leaderboard view. Note: CF requires "SUN" rather
   // than 0 here — see wrangler.toml comment.
   "0 23 * * SUN": "compute-leaderboard.yml",
+  // 04:00 UTC Sunday = ~midnight ET Sunday. Refreshes the eligibility
+  // table from Finnhub. Runs early enough that the Phase 2 universe
+  // rotation pipeline (still pending) can rely on fresh data. See ADR 0018.
+  "0 4 * * SUN": "refresh-eligible-universe.yml",
 };
 
 export default {

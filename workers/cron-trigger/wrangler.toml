@@ -36,6 +36,12 @@ crons = [
   # Use named "SUN" rather than 0 — Cloudflare's cron parser rejects a
   # bare 0 for day-of-week even though standard cron accepts it.
   "0 23 * * SUN",
+
+  # 04:00 UTC Sunday = ~midnight ET Sunday → refresh-eligible-universe.yml.
+  # Runs before the Phase 2 universe rotation (still pending) so the
+  # refreshed eligibility table is ready when the rotation pipeline reads
+  # it. See ADR 0018.
+  "0 4 * * SUN",
 ]
 
 [vars]

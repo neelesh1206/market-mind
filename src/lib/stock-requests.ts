@@ -43,6 +43,29 @@ export async function fetchTopStockRequests(
 }
 
 /**
+ * How many unique-ticker requests the current user has made in the
+ * last 7 days (rolling window). Used to drive the "X of 5 used" badge
+ * on the request panel. Goes through the `get_user_weekly_request_count`
+ * SECURITY DEFINER RPC, which infers the user from `auth.uid()`.
+ *
+ * Returns 0 on any error (e.g., migration not applied) so the UI keeps
+ * working in a degraded state — the RPC's own enforcement is the
+ * authoritative gate.
+ */
+export async function fetchUserWeeklyRequestCount(
+  client: SupabaseClient,
+): Promise<number> {
+  const { data, error } = await client.rpc("get_user_weekly_request_count");
+  if (error) {
+    console.warn(
+      `[stock-requests] get_user_weekly_request_count failed: ${error.message}`,
+    );
+    return 0;
+  }
+  return Number(data ?? 0);
+}
+
+/**
  * The tickers the current user has already voted for. Used to highlight
  * "your vote" in the UI and to show the toggle as already-pressed.
  *
