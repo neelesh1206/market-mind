@@ -10,7 +10,15 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // Don't collide with Playwright e2e specs — they live in tests/e2e and
     // use a different runner.
-    exclude: ["node_modules", "tests/e2e/**", ".next/**"],
+    exclude: [
+      "node_modules",
+      "tests/e2e/**",
+      ".next/**",
+      // Cloudflare Worker is a separate package with its own node_modules
+      // (wrangler ships test files inside several transitive deps).
+      // Without this, vitest tries to run blake3-wasm + esbuild-plugins tests.
+      "workers/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov", "json-summary"],

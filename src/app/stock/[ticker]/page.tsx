@@ -15,6 +15,7 @@ import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchStockDetail } from "@/lib/stock-detail";
 import { fetchBetsForTradingDay } from "@/lib/bets";
 import { fetchDailyBars } from "@/lib/price-history";
+import { getLivePrice } from "@/lib/live-prices";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { BetCta } from "@/components/bet-cta";
 import { StockSparkline } from "@/components/stock-sparkline";
@@ -73,6 +74,9 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   // Build the parallel-fetch list. Skip user-scoped queries when anonymous.
   const detailP = fetchStockDetail(supabase, ticker);
   const priceBarsP = fetchDailyBars(ticker, 30);
+  // Cached snapshot (15-min delayed via Polygon, 5-min Upstash TTL) — shown
+  // in the header price block. Failures degrade gracefully to prev_close.
+  const livePriceP = getLivePrice(ticker);
   const watchlistP = userId
     ? fetchUserWatchlist(supabase, userId)
     : Promise.resolve([]);
@@ -87,12 +91,13 @@ export default async function StockDetailPage({ params }: { params: Params }) {
     ? fetchBetsForTradingDay(supabase, userId, schedule.tradingDayLabel)
     : Promise.resolve({} as Record<string, never>);
 
-  const [detail, watchlist, profileRes, betsByStockId, priceBars] = await Promise.all([
+  const [detail, watchlist, profileRes, betsByStockId, priceBars, livePrice] = await Promise.all([
     detailP,
     watchlistP,
     profileP,
     betsP,
     priceBarsP,
+    livePriceP,
   ]);
 
   if (!detail) {
@@ -190,13 +195,33 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           {insight && (
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 pt-2">
               <span className="font-mono text-2xl font-semibold tabular-nums">
-                {insight.prev_close != null ? `$${insight.prev_close.toFixed(2)}` : "—"}
+                {/* Prefer live snapshot when available; fall back to the
+                    pipeline's pinned prev_close otherwise. */}
+                {(livePrice?.price ?? insight.prev_close) != null
+                  ? `$${(livePrice?.price ?? insight.prev_close)!.toFixed(2)}`
+                  : "—"}
               </span>
-              <PctChange label="day" value={insight.day_change_pct} />
+              {/* When we have live data, show today's % change (live);
+                  the pipeline's day_change is from yesterday's bar so it
+                  goes stale during market hours. Other windows are still
+                  trailing/calendar so they remain accurate. */}
+              {livePrice?.changePct != null ? (
+                <PctChange label="day (live)" value={livePrice.changePct} />
+              ) : (
+                <PctChange label="day" value={insight.day_change_pct} />
+              )}
               <PctChange label="week" value={insight.week_change_pct} />
               <PctChange label="month" value={insight.month_change_pct} />
               <PctChange label="YTD" value={insight.ytd_change_pct} />
             </div>
+          )}
+          {livePrice?.price != null && (
+            <p
+              className="text-muted-foreground/70 text-[10px] tracking-wider uppercase"
+              title="Polygon free-tier snapshots are delayed by 15 minutes. Cached for 5 minutes via Upstash Redis."
+            >
+              Live · ~15 min delayed
+            </p>
           )}
 
           {insight &&

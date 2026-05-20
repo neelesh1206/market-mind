@@ -9,6 +9,7 @@ import { VerdictChip } from "@/components/verdict-chip";
 import { BetCta } from "@/components/bet-cta";
 import { cn } from "@/lib/utils";
 import type { Prediction } from "@/lib/bets";
+import type { LivePrice } from "@/lib/live-prices";
 import type { StockCardData } from "@/types/insight";
 import type { MarketSchedule } from "@/lib/market-schedule";
 
@@ -22,6 +23,13 @@ type Props = {
   schedule?: MarketSchedule;
   /** Today's ET calendar date (YYYY-MM-DD). Passed through to BetCta for stuck-bet derivation. */
   todayEt?: string;
+  /**
+   * Live (15-min-delayed) snapshot — when present, the header shows the
+   * current price + day change instead of the pipeline's stored prev_close.
+   * Pass null/undefined to keep the old prev_close-only behavior (logged-out
+   * preview, /stocks listing where we don't fetch live data).
+   */
+  livePrice?: LivePrice | null;
   /**
    * Preview mode for the logged-out /login page. When true:
    *   - bet CTA becomes a "Sign in to bet →" link to /login
@@ -39,9 +47,21 @@ type Props = {
  * The full per-signal breakdown lives on /stock/[ticker]. This card is
  * intentionally dense-but-scannable — every row earns its place.
  */
-export function StockCard({ data, userBet, userCredits, schedule, todayEt, preview }: Props) {
+export function StockCard({
+  data,
+  userBet,
+  userCredits,
+  schedule,
+  todayEt,
+  livePrice,
+  preview,
+}: Props) {
   const { stock, insight, topArticle, verdict } = data;
   const detailHref = `/stock/${stock.ticker}`;
+  // Prefer the live snapshot when we have one — it's "now" (15-min delayed)
+  // rather than the pipeline's frozen prev_close. Falls back cleanly.
+  const displayPrice = livePrice?.price ?? insight?.prev_close ?? null;
+  const displayChangePct = livePrice?.changePct ?? null;
 
   return (
     <article
@@ -79,9 +99,24 @@ export function StockCard({ data, userBet, userCredits, schedule, todayEt, previ
 
           <div className="shrink-0 space-y-1 text-right">
             <p className="font-mono text-xl font-semibold tabular-nums">
-              {insight?.prev_close != null ? `$${insight.prev_close.toFixed(2)}` : "—"}
+              {displayPrice != null ? `$${displayPrice.toFixed(2)}` : "—"}
             </p>
-            <PriceChip pct={insight?.week_change_pct} suffix="wk" />
+            {/* When we have a live snapshot show today's % change with a
+                "live ~15min" microlabel; otherwise fall back to the
+                weekly change from the pipeline insight as before. */}
+            {livePrice && displayChangePct != null ? (
+              <div className="flex items-center justify-end gap-1.5">
+                <PriceChip pct={displayChangePct} suffix="today" />
+                <span
+                  className="text-muted-foreground/60 text-[9px] tracking-wider uppercase"
+                  title="Polygon snapshot — 15-minute delayed quote"
+                >
+                  · live
+                </span>
+              </div>
+            ) : (
+              <PriceChip pct={insight?.week_change_pct} suffix="wk" />
+            )}
             {insight && (
               <div className="flex justify-end pt-1">
                 <SignalStrip

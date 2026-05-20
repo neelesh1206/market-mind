@@ -5,6 +5,7 @@ import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchConvictionList, fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
 import { fetchBetsForTradingDay, fetchUnrevealedResolved } from "@/lib/bets";
 import { getDailyBonusStatus } from "@/lib/bonus";
+import { getLivePrices } from "@/lib/live-prices";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { ConvictionList } from "@/components/conviction-list";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
@@ -48,6 +49,12 @@ export default async function Home() {
     ]);
   const feed = rankFeed(feedUnsorted);
   const watchlistTickers = new Set(watchlist.map((s) => s.ticker));
+
+  // Live (15-min-delayed) snapshots for every watchlist ticker — shared
+  // Upstash cache means 1 Polygon call per ticker per 5 min globally, well
+  // under free-tier 5/min even with many concurrent users. Failures degrade
+  // to "—" on individual cards; never blocks page render.
+  const livePrices = await getLivePrices(watchlist.map((s) => s.ticker));
 
   const { data: profile } = await supabase
     .from("user_profiles")
@@ -174,6 +181,7 @@ export default async function Home() {
                   userCredits={credits}
                   schedule={schedule}
                   todayEt={todayEt}
+                  livePrice={livePrices.get(card.stock.ticker) ?? null}
                 />
               ))}
             </div>
