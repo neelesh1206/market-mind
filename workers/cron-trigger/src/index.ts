@@ -47,8 +47,9 @@ const CRON_TO_WORKFLOW: Record<string, string> = {
   // awards badges.
   "15 21 * * 1-5": "resolve-predictions.yml",
   // 23:00 UTC Sunday = 19:00 ET Sunday. Aggregates the prior week's
-  // accuracy into the leaderboard view.
-  "0 23 * * 0": "compute-leaderboard.yml",
+  // accuracy into the leaderboard view. Note: CF requires "SUN" rather
+  // than 0 here — see wrangler.toml comment.
+  "0 23 * * SUN": "compute-leaderboard.yml",
 };
 
 export default {
