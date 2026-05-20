@@ -271,3 +271,93 @@ def test_combined_score_independent_of_vol_factor():
         realized_vol_20d=0.04,
     )
     assert base.combined_score == high_vol.combined_score
+
+
+# ---------------------------------------------------------------------------
+# Fallback reasoning — concrete phrases pulled from the breakdown JSON
+# ---------------------------------------------------------------------------
+
+from pipeline.processors.verdict import _fallback_reasoning
+
+
+def test_fallback_reasoning_without_breakdown_keeps_old_format():
+    """Backwards compat: no breakdown attached → name-driven text."""
+    v = compute_verdict(technical=0.5, sentiment=0.2, professional=0.6, social=0.1)
+    # No breakdown attached
+    text = _fallback_reasoning(v)
+    assert text.startswith("Bullish")
+    assert "driven primarily by" in text
+
+
+def test_fallback_reasoning_with_breakdown_surfaces_concrete_analyst_split():
+    v = compute_verdict(technical=0.1, sentiment=0.0, professional=0.6, social=0.0)
+    v.breakdown = {
+        "professional": {
+            "analyst_split": {"buy": 12, "hold": 2, "sell": 0, "total": 14},
+            "rating_change": "upgrade",
+        },
+        "technical": {},
+        "sentiment": {},
+        "social": {},
+    }
+    text = _fallback_reasoning(v)
+    assert text.startswith("Bullish")
+    assert "12 of 14 analysts rate Buy" in text
+
+
+def test_fallback_reasoning_bearish_surfaces_sell_ratings():
+    v = compute_verdict(technical=-0.2, sentiment=-0.1, professional=-0.5, social=-0.1)
+    v.breakdown = {
+        "professional": {
+            "analyst_split": {"buy": 2, "hold": 4, "sell": 8, "total": 14},
+            "rating_change": "downgrade",
+            "insider": "selling",
+        },
+        "technical": {},
+        "sentiment": {},
+        "social": {},
+    }
+    text = _fallback_reasoning(v)
+    assert text.startswith("Bearish")
+    assert "8 of 14 analysts rate Sell" in text
+
+
+def test_fallback_reasoning_surfaces_technical_classifications():
+    v = compute_verdict(technical=0.6, sentiment=0.0, professional=0.0, social=0.0)
+    v.breakdown = {
+        "technical": {
+            "rsi": "oversold",
+            "macd": "bullish_crossover",
+            "ma20": "above",
+            "volume": "increasing",
+        },
+        "sentiment": {},
+        "professional": {},
+        "social": {},
+    }
+    text = _fallback_reasoning(v)
+    assert text.startswith("Bullish")
+    assert "oversold RSI" in text or "MACD bullish crossover" in text
+
+
+def test_fallback_reasoning_neutral_with_breakdown_names_both_sides():
+    """NEUTRAL is the most important fallback to make concrete — users
+    benefit from seeing exactly what's pulling each way."""
+    v = compute_verdict(technical=-0.4, sentiment=0.0, professional=0.4, social=0.0)
+    v.breakdown = {
+        "professional": {
+            "analyst_split": {"buy": 10, "hold": 4, "sell": 0, "total": 14},
+        },
+        "technical": {"rsi": "overbought", "ma20": "below"},
+        "sentiment": {},
+        "social": {},
+    }
+    text = _fallback_reasoning(v)
+    assert "Mixed" in text
+    assert "pulling up" in text and "pulling down" in text
+
+
+def test_fallback_reasoning_all_buckets_none_graceful():
+    v = compute_verdict(technical=None, sentiment=None, professional=None, social=None)
+    text = _fallback_reasoning(v)
+    assert "no clear signal" in text

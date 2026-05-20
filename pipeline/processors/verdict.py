@@ -64,6 +64,14 @@ class Verdict:
     # so resolved-prediction analysis can stratify by combined-score
     # magnitude independent of the direction call.
     combined_score: float = 0.0
+    # Aggregator breakdown — same JSONB shape that ships in
+    # `stock_insights.signal_breakdown`. Optional because callers can
+    # construct a Verdict without it (the math-only path doesn't need
+    # this). When present, `_fallback_reasoning` uses the concrete
+    # numbers inside (analyst counts, RSI classification, etc.) to
+    # produce a richer fallback sentence than just naming bucket names.
+    # NOT serialized to the DB — only used for human-readable text.
+    breakdown: dict | None = None
 
 
 def _vol_factor(realized_vol_20d: float | None) -> float:
@@ -247,16 +255,36 @@ def fmt(v: float | None) -> str:
 
 
 def _fallback_reasoning(verdict: Verdict) -> str:
-    """Used when the LLM fails — keeps the row useful even without nice prose."""
+    """Used when the LLM fails — keeps the row useful even without nice prose.
+
+    Two modes:
+      1. **No breakdown available** — falls back to the old "driven by X and Y"
+         phrasing using bucket names.
+      2. **Breakdown available** — produces concrete phrases using the actual
+         numbers in each bucket's breakdown (analyst splits, insider activity,
+         technical classifications, sources agreement). Significantly more
+         useful for users than naming abstract bucket categories.
+    """
     scores = [(k, v) for k, v in verdict.bucket_scores.items() if v is not None]
     if not scores:
         return f"{verdict.direction.title()} — no clear signal across buckets."
 
+    breakdown = verdict.breakdown
+    sign = 1 if verdict.direction == "UP" else -1 if verdict.direction == "DOWN" else 0
+
     if verdict.direction == "NEUTRAL":
+        if breakdown:
+            # Enumerate the strongest pull in each direction so the user
+            # sees *which* buckets are fighting.
+            ups = [(k, v) for k, v in scores if v > 0]
+            downs = [(k, v) for k, v in scores if v < 0]
+            up_frag = _describe_top(ups, breakdown, +1) if ups else None
+            down_frag = _describe_top(downs, breakdown, -1) if downs else None
+            if up_frag and down_frag:
+                return f"Mixed — {up_frag} pulling up, {down_frag} pulling down. No clear read."
         return "Mixed — buckets point in different directions; no clear read."
 
-    # Pick the top 2 by absolute magnitude in the direction of the verdict
-    sign = 1 if verdict.direction == "UP" else -1
+    # Directional: pick top 2 aligned buckets and describe them concretely
     aligned = sorted(
         [(k, v) for k, v in scores if (v * sign) > 0],
         key=lambda kv: abs(kv[1]),
@@ -266,6 +294,137 @@ def _fallback_reasoning(verdict: Verdict) -> str:
         prefix = "Bullish" if verdict.direction == "UP" else "Bearish"
         return f"{prefix} — weighted signal slightly above threshold."
 
-    drivers = [k for k, _ in aligned[:2]]
     prefix = "Bullish" if verdict.direction == "UP" else "Bearish"
+
+    if breakdown:
+        fragments = []
+        for bucket_name, _ in aligned[:2]:
+            frag = _describe_bucket(bucket_name, breakdown.get(bucket_name) or {}, sign)
+            if frag:
+                fragments.append(frag)
+        if fragments:
+            return f"{prefix} — " + "; ".join(fragments) + "."
+
+    # No breakdown or no useful fragments — name buckets like before.
+    drivers = [k for k, _ in aligned[:2]]
     return f"{prefix} — driven primarily by {' and '.join(drivers)} signals."
+
+
+def _describe_top(
+    candidates: list[tuple[str, float]],
+    breakdown: dict,
+    sign: int,
+) -> str | None:
+    """For NEUTRAL mode — describe the strongest bucket in a given direction."""
+    if not candidates:
+        return None
+    top = max(candidates, key=lambda kv: abs(kv[1]))
+    bucket_name, _ = top
+    frag = _describe_bucket(bucket_name, breakdown.get(bucket_name) or {}, sign)
+    return frag or bucket_name
+
+
+def _describe_bucket(name: str, data: dict, sign: int) -> str | None:
+    """Return a concrete phrase for one bucket given the breakdown JSON, or
+    None if nothing concrete was available. `sign` is +1 for the bullish
+    framing, -1 for bearish — used to pick the right adjectives.
+    """
+    if name == "professional":
+        return _describe_professional(data, sign)
+    if name == "technical":
+        return _describe_technical(data, sign)
+    if name == "sentiment":
+        return _describe_sentiment(data, sign)
+    if name == "social":
+        return _describe_social(data, sign)
+    return None
+
+
+def _describe_professional(data: dict, sign: int) -> str | None:
+    parts: list[str] = []
+    split = data.get("analyst_split") or {}
+    total = split.get("total") or 0
+    if total > 0:
+        buy = split.get("buy") or 0
+        sell = split.get("sell") or 0
+        if sign > 0 and buy / total >= 0.6:
+            parts.append(f"{buy} of {total} analysts rate Buy")
+        elif sign < 0 and sell / total >= 0.3:
+            parts.append(f"{sell} of {total} analysts rate Sell")
+    rating_change = data.get("rating_change")
+    if sign > 0 and rating_change == "upgrade":
+        parts.append("recent upgrade")
+    elif sign < 0 and rating_change == "downgrade":
+        parts.append("recent downgrade")
+    insider = data.get("insider")
+    if sign > 0 and insider == "buying":
+        parts.append("insider buying")
+    elif sign < 0 and insider == "selling":
+        parts.append("insider selling")
+    earnings_in = data.get("earnings_in_days")
+    if isinstance(earnings_in, int) and earnings_in <= 3:
+        parts.append(f"earnings in {earnings_in}d")
+    if not parts:
+        return None
+    return ", ".join(parts[:2])  # cap fragments so the sentence doesn't sprawl
+
+
+def _describe_technical(data: dict, sign: int) -> str | None:
+    parts: list[str] = []
+    rsi = data.get("rsi")
+    if sign > 0 and rsi in ("oversold", "leaning_bullish"):
+        parts.append("oversold RSI" if rsi == "oversold" else "RSI leaning bullish")
+    elif sign < 0 and rsi in ("overbought", "leaning_bearish"):
+        parts.append("overbought RSI" if rsi == "overbought" else "RSI leaning bearish")
+    macd = data.get("macd")
+    if sign > 0 and macd == "bullish_crossover":
+        parts.append("MACD bullish crossover")
+    elif sign < 0 and macd == "bearish_crossover":
+        parts.append("MACD bearish crossover")
+    ma20 = data.get("ma20")
+    if sign > 0 and ma20 == "above":
+        parts.append("above 20-day MA")
+    elif sign < 0 and ma20 == "below":
+        parts.append("below 20-day MA")
+    volume = data.get("volume")
+    if volume == "increasing":
+        parts.append("rising volume")
+    if not parts:
+        return None
+    return ", ".join(parts[:2])
+
+
+def _describe_sentiment(data: dict, sign: int) -> str | None:
+    if not data:
+        return None
+    parts: list[str] = []
+    agree = data.get("sources_agree")
+    total = data.get("sources_total")
+    article_count = data.get("article_count")
+    if agree is not None and total is not None and total > 0:
+        direction_word = "bullish" if sign > 0 else "bearish"
+        parts.append(f"{agree} of {total} sources {direction_word}")
+    elif article_count:
+        direction_word = "positive" if sign > 0 else "negative"
+        parts.append(f"{direction_word} news flow across {article_count} articles")
+    if not parts:
+        return None
+    return parts[0]
+
+
+def _describe_social(data: dict, sign: int) -> str | None:
+    parts: list[str] = []
+    bullish_pct = data.get("stocktwits_bullish_pct")
+    if bullish_pct is not None:
+        if sign > 0 and bullish_pct >= 60:
+            parts.append(f"{int(round(bullish_pct))}% bullish on StockTwits")
+        elif sign < 0 and bullish_pct <= 40:
+            parts.append(f"only {int(round(bullish_pct))}% bullish on StockTwits")
+    herding = data.get("herding_intensity")
+    if isinstance(herding, (int, float)) and herding >= 0.6:
+        # Per ADR 0013 the herding component INVERTS the directional pull
+        # — flag it explicitly so the reasoning hangs together.
+        parts.append("heavy retail attention (we fade these)")
+    if not parts:
+        return None
+    return parts[0]

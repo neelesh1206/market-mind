@@ -455,6 +455,12 @@ async def _process_stock(
         social=buckets.social,
         realized_vol_20d=price.realized_vol_20d if price else None,
     )
+    # Attach the aggregator's breakdown so _fallback_reasoning has access
+    # to the concrete per-bucket numbers (analyst splits, insider activity,
+    # technical classifications) and can produce richer fallback text when
+    # the LLM reasoner fails. Not serialized to the DB — already in
+    # `stock_insights.signal_breakdown`.
+    verdict.breakdown = buckets.breakdown
     reasoning: str | None = None
     if verdict_reasoner:
         try:
