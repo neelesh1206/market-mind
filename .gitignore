@@ -68,3 +68,6 @@ coverage.xml
 workers/**/node_modules
 workers/**/.wrangler
 workers/**/dist
+# .dev.vars holds secrets for `wrangler dev` local runs (PAT etc.) —
+# NEVER commit. The real secrets live in CF's secret store.
+workers/**/.dev.vars
