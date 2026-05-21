@@ -86,6 +86,11 @@ Picked one paid data API over a fan-out of cheaper sources.
 - Massive's $29 Starter tier covers prices + news + technicals in one
 - Free APIs (Finnhub, SEC EDGAR, StockTwits, Reddit, ApeWisdom, FRED) fill the rest
 - 10+ sources total, but one is the reliable foundation
+- Beyond the price/news data: each article also ships with Polygon's LLM-generated
+  **per-ticker `insights[]`** (sentiment + reasoning specific to *our* ticker, not the
+  article overall). We use it as a relevance gate at fetch (drops ~9-15% of off-topic
+  noise), as a sentiment input that gets blended with our local FinBERT score, and as
+  a seed for the Llama TL;DR prompt. See [ADR 0020](adr/0020-polygon-per-ticker-insights.md).
 
 This is the "boring tech" principle: one professional API > five flaky scrapers.
 

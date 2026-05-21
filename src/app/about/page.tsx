@@ -230,7 +230,9 @@ export default async function AboutPage() {
               </li>
               <li>
                 <span className="text-foreground font-medium">News headlines</span> — up to ~20
-                articles per stock from Massive (formerly Polygon.io).
+                articles per stock from Massive (formerly Polygon.io). Each article ships with
+                Polygon&apos;s ticker-specific relevance + sentiment metadata, which we use to
+                drop passing mentions before they hit the pipeline.
               </li>
               <li>
                 <span className="text-foreground font-medium">Analyst ratings</span> —
@@ -264,13 +266,17 @@ export default async function AboutPage() {
                 <span className="text-foreground italic">&ldquo;raised guidance&rdquo;</span> is
                 bullish, but{" "}
                 <span className="text-foreground italic">&ldquo;raised concerns&rdquo;</span> is
-                bearish.
+                bearish. Its continuous score is then blended with Polygon&apos;s categorical
+                per-ticker sentiment so the final number captures both how the article reads
+                overall and how it pertains to this specific stock.
               </li>
               <li>
                 <span className="text-foreground font-medium">Llama-3 / Mistral</span> turns the
                 math (the four bucket scores) into the one-sentence English explanation under the
                 verdict chip — &ldquo;Bullish — driven by strong analyst upgrades and rising
-                technical momentum.&rdquo;
+                technical momentum.&rdquo; It also writes each article&apos;s TL;DR, seeded with
+                Polygon&apos;s ticker-specific reasoning so the summary stays focused on this
+                stock instead of the broader article.
               </li>
             </ul>
             <p className="text-muted-foreground text-sm leading-relaxed">
@@ -339,7 +345,7 @@ export default async function AboutPage() {
             color="text-emerald-500"
             description="What financial journalists are saying about this stock right now."
             sources={[
-              "Massive (news API)",
+              "Massive (news API) — including Polygon's per-ticker insights",
               "Finnhub (company news)",
               "MarketWatch (best-effort, when reachable)",
               "FinBERT (sentiment classification)",
@@ -347,11 +353,13 @@ export default async function AboutPage() {
             ]}
             inputs={[
               "Up to ~20 recent articles per stock",
-              "FinBERT classifies each as positive / neutral / negative",
+              "Polygon's per-ticker relevance gate drops articles that don't specifically discuss this stock (sector pieces, comparables, M&A coverage)",
+              "FinBERT classifies each surviving article as positive / neutral / negative",
+              "FinBERT's continuous score is averaged with Polygon's categorical per-ticker sentiment",
               "Recency-weighted: today's news matters more than week-old news",
               'Cross-source agreement is reported (e.g. "4 of 5 sources agree")',
             ]}
-            formula="Weighted average of per-article sentiment scores, scaled by source agreement to avoid noisy single-source spikes."
+            formula="Weighted average of per-article (FinBERT-blended-with-Polygon) sentiment scores, scaled by source agreement to avoid noisy single-source spikes."
           />
 
           <SignalSection
@@ -791,8 +799,9 @@ otherwise             →  NEUTRAL`}
             </li>
             <li>
               <span className="text-foreground">FinBERT is good, not perfect.</span> It can
-              misclassify finance-specific irony or jargon. Cross-source agreement helps but
-              doesn&apos;t eliminate the problem.
+              misclassify finance-specific irony or jargon. Blending with Polygon&apos;s
+              per-ticker sentiment + cross-source agreement helps but doesn&apos;t eliminate
+              the problem.
             </li>
           </ul>
         </section>

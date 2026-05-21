@@ -118,7 +118,7 @@ Each insight has **4 bucket scores** (technical, sentiment, professional, social
 | Bucket | Inputs |
 |--------|--------|
 | Technical | RSI, MACD, moving averages, volume trend (Massive + ta-lib) |
-| Sentiment | FinBERT on news from Massive, Finnhub, MarketWatch (best-effort) |
+| Sentiment | Polygon-filtered news from Massive blended with FinBERT (local CPU) — Polygon's per-ticker `insights[]` field gates relevance at fetch, then FinBERT's continuous score is averaged with Polygon's categorical sentiment (ADR 0020) |
 | Professional | Finnhub analyst consensus, SEC EDGAR Form 4 (insider) |
 | Social | StockTwits, Reddit, ApeWisdom |
 
@@ -168,3 +168,4 @@ For the reasoning behind each design choice, see the ADRs:
 | [0004](adr/0004-github-actions-for-pipeline.md) | GitHub Actions over FastAPI/Modal for the pipeline |
 | [0005](adr/0005-massive-as-primary-data-source.md) | Massive as primary paid data source |
 | [0011](adr/0011-signal-quality-p0-fixes.md) | Signal-quality P0 fixes (resolution window, PIT filter, weight renormalization) |
+| [0020](adr/0020-polygon-per-ticker-insights.md) | Polygon's per-ticker insights[] as relevance gate + sentiment blend + LLM seed |

@@ -20,7 +20,7 @@ Daily stock-prediction game with a transparent signal engine. Python pipeline vi
 | Mutations | SECURITY DEFINER RPCs | Atomic txn, RLS-scoped, one round-trip |
 | Pipeline | Python on GH Actions | Free runner, 60-min budget fits 50-stock run |
 | Stock data | Massive Starter ($29) + Finnhub free | Historical + real-time without paying $79 |
-| NLP | FinBERT local + Llama via HF | Local kills the rate-limit dep on the hot path |
+| NLP | FinBERT local + Llama via HF + Polygon per-ticker insights | Local kills the rate-limit dep on the hot path; Polygon's insights[] pre-filter relevance + seed both sentiment and summary |
 | Cache | Upstash Redis | Shared across Vercel instances, free 10k/day |
 | Cron | Cloudflare Worker | GH `schedule:` drifted 3h; CF reliable to ~1min |
 | Tests | Vitest + Playwright + pytest | 80 + 7 + 20 = all CI-gated |
@@ -29,6 +29,7 @@ Daily stock-prediction game with a transparent signal engine. Python pipeline vi
 ## Talk-about ADRs (memorize one of these)
 
 - **0013 — Social bucket "fade the crowd."** Retail attention spikes precede *underperformance* (Barber & Odean 2008; Da-Engelberg-Gao 2011). Rewrote social to *dampen* directional signal at peak herding, not amplify. Behavior-changing model decision grounded in academic literature.
+- **0020 — Polygon per-ticker insights for relevance + sentiment blend.** Found that Polygon already runs its own LLM over every article and emits per-ticker `insights[]` (sentiment + free-text reasoning). Used it three ways at once: fetch-time relevance filter (drops ~9-15% noise), sentiment blend (avg with FinBERT's continuous score), and seed for our Llama summarizer prompt. Right answer when an upstream API already encodes a signal you'd otherwise pay tokens to recompute.
 - **0012 — Local FinBERT + HF circuit breaker.** HF rate-limited a production run for 45 min. Moved FinBERT to local CPU torch on the runner (~30s warm, ~3min cold), kept Llama on HF behind a 5-failure circuit breaker with rule-based fallback. Concrete reliability win.
 - **0016 — Cloudflare Worker for cron.** GH Actions `schedule:` drifted ~3h on first eligible fire. ~80-line CF Worker dispatches via `workflow_dispatch` API. Pushed back on platform SLA when wrong for product.
 - **0017 — Entry-vs-close for in-market bets.** Originally `open → close` for all bets (ADR 0008). Once live prices shipped, mid-day bettors had unfair advantage. New two-mode resolver, existing bets grandfathered. Fairness > simplicity.

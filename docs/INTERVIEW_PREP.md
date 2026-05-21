@@ -66,7 +66,7 @@ If someone says "walk me through this project":
 >
 > 2. **The architecture.** Three layers. The Python pipeline is the *producer* — it runs on GitHub Actions every night and writes signal data to Supabase Postgres. The database is the *contract* — every signal/verdict read goes through it. The Next.js app on Vercel is the *consumer* — it reads from Supabase via Row-Level-Security policies and presents the UI. The one exception to "no third-party calls at render time" is the live-price layer (Finnhub), and even there we go through an Upstash Redis cache with a 5-minute TTL — so on a steady-state page render most calls hit Redis, not Finnhub. The signal data — buckets, verdict, articles — is always served from Postgres. Vendor outages can't take down the website.
 >
-> 3. **The signal engine.** Each stock gets four bucket scores in `[-1, +1]`: technical (RSI, MACD, moving averages from yfinance), sentiment (news articles scored by FinBERT, which I run locally on the pipeline runner to avoid HuggingFace rate limits), professional (analyst consensus from Finnhub plus insider transactions from SEC EDGAR), and social (StockTwits bullish ratio plus Reddit mentions, with the social bucket deliberately damping rather than amplifying — research consistently shows retail-attention spikes precede underperformance for non-meme tickers).
+> 3. **The signal engine.** Each stock gets four bucket scores in `[-1, +1]`: technical (RSI, MACD, moving averages from yfinance), sentiment (news articles pre-filtered by Polygon's per-ticker `insights[]` relevance signal, then scored locally by FinBERT and blended with Polygon's categorical sentiment), professional (analyst consensus from Finnhub plus insider transactions from SEC EDGAR), and social (StockTwits bullish ratio plus Reddit mentions, with the social bucket deliberately damping rather than amplifying — research consistently shows retail-attention spikes precede underperformance for non-meme tickers).
 >
 > 4. **The verdict.** I take a weighted average of the four buckets — `0.30, 0.25, 0.30, 0.15` for technical, sentiment, professional, social — scale the threshold by 20-day realized volatility so quiet stocks like PG don't get over-called and noisy ones like NVDA don't get under-called, and produce UP / DOWN / NEUTRAL. Llama-3 turns the result into a one-sentence English explanation; if HuggingFace is down, a rule-based fallback runs the same scoring without LLM dependency.
 >
@@ -349,13 +349,15 @@ const userId = data.claims.sub as string;
 for each stock in active universe (50):
     │
     ├─ price_snapshot ← YFinancePriceFetcher (OHLCV, RSI, MACD)
-    ├─ articles ← MassiveNewsFetcher (news for the past 24h)
+    ├─ articles ← MassiveNewsFetcher (news, Polygon insights[] relevance gate — ADR 0020)
+    │                                  (drops ~9-15% off-topic at fetch time)
     ├─ analyst ← FinnhubAnalystFetcher (consensus + rating changes)
     ├─ insider ← SecInsiderFetcher (form-4 transactions)
     ├─ social ← StockTwitsFetcher + ApeWisdomFetcher (+ optional Reddit)
     │
-    ├─ sentiment_scores ← FinBERTSentimentProcessor(articles)  # local
-    ├─ tldrs ← LlamaSummarizer(articles)                       # HF API
+    ├─ FinBERTSentimentProcessor(articles)        # local CPU
+    ├─ apply_polygon_blend(articles)              # avg FinBERT + Polygon per-ticker sentiment
+    ├─ tldrs ← LlamaSummarizer(articles)          # HF API, seeded with Polygon's reasoning
     │
     ├─ bucket_scores ← Aggregator(price, articles, analyst, insider, social)
     │
@@ -845,10 +847,18 @@ Filed but not yet shipped:
 
 → The promo-code redemption RLS-join bug. Short story: after a successful code redemption, the credits were applied correctly and the daily-cap counter updated correctly, but the "Recent redemptions" history list rendered empty after the user reopened the dialog. Root cause: PostgreSQL Row-Level Security is a row-visibility filter, not an access-denial mechanism, and PostgREST embed inner-joins respect RLS on **both** tables — so my history query that joined the deny-all `promo_codes` catalog table came back with zero rows even though the redemption rows existed. Lint, typecheck, build, and unit tests all passed because the failure mode is a runtime interaction between schema + policies + query shape. Found via manual smoke test. Fixed with a narrow SELECT policy: users can read `promo_codes` rows IFF they have a redemption against them. The deep section: see ["6. PostgREST inner joins…"](#6-postgrest-inner-joins-silently-filter-to-empty-when-joined-table-has-no-select-policy).
 
+### "How does your news pipeline decide what's relevant?"
+
+→ Three layers, each catching a different failure mode. **Fetch-time:** Polygon's `/v2/reference/news` returns a per-article `insights[]` array where each entry corresponds to a ticker the article specifically discusses (their LLM populates it). I drop articles where the target ticker isn't in `insights[]` — kills ~9-15% of noise before it hits the database. **Score-time:** Polygon's per-ticker categorical sentiment (positive/negative/neutral) is averaged with FinBERT's continuous score so the final number captures both holistic article tone and ticker-specific framing. **Render-time:** read-side TL;DR pattern matching catches any residual off-topic articles (legacy rows before the upstream fix landed, or LLM phrasings we missed). See [ADR 0020](adr/0020-polygon-per-ticker-insights.md). Key insight: when an upstream API already encodes a signal you need (Polygon's `insights[]` is their LLM-generated ticker-specific sentiment), use it. The 9-15% noise reduction is essentially free — Polygon was already paying to compute it.
+
+### "Why blend FinBERT with Polygon instead of picking one?"
+
+→ They're different estimators of different things. FinBERT scores the **article body holistically** — strong on neutral-vs-loaded language, weak on multi-company articles where the sentiment toward our specific ticker may differ from the article's overall tone. Polygon's insight LLM is **ticker-specific by construction** — strong on "this article is positive for AAPL but negative for IBM," weak on fine-grained intensity (only 3 categories). Equal-weight averaging treats them as independent estimators of the same quantity, which is the right Bayesian prior in the absence of calibration data. Once we have ≥300 resolved predictions tied to articles, we can fit a weight `α` against realized direction.
+
 ### "How does Postgres RLS actually work?"
 
 → RLS rewrites the query plan: every `SELECT` against a table with RLS effectively gets an `AND <policy_expression>` appended for the calling role. Policies are *filters*, not *deny lists* — with no policy, the implicit filter is `false`, so the visible row count for that role is zero (no error, just empty). Service-role bypasses RLS entirely (that's why we use it for admin/pipeline writes). The non-obvious piece: when a query joins two RLS-protected tables (via SQL join or PostgREST embed), the policies on **each table** filter independently before the join. So if you have a strict policy on one side and a loose policy on the other, the strict side gates the result. This is why a working own-read policy on `promo_code_redemptions` wasn't enough — the joined `promo_codes` table also needed a (narrow) policy for the user's redemption-history query to return rows.
 
 ---
 
-*Last updated: 2026-05-21 (Day 4, in progress).*
+*Last updated: 2026-05-21 (Day 5, in progress).*
