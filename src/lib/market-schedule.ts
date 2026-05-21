@@ -94,8 +94,16 @@ const PIPELINE_TYPICAL_DURATION_MIN = 25;
 const MARKET_OPEN_HOUR_ET = 9;
 const MARKET_OPEN_MIN_ET = 30;
 const MARKET_CLOSE_HOUR_ET = 16; // 4 PM
-const RESOLUTION_HOUR_ET = 16;
-const RESOLUTION_MIN_ET = 15;
+// Resolution cron fires at 21:15 UTC Mon-Fri (CF Worker schedule
+// "15 21 * * 1-5"). We anchor the UI to that UTC instant rather than a
+// fixed ET wall-clock hour because DST shifts the ET equivalent twice
+// a year — 5:15 PM EDT (Mar-Nov) vs 4:15 PM EST (Nov-Mar). The previous
+// `RESOLUTION_HOUR_ET = 16` constant matched only the winter behavior;
+// during summer the UI would flip to "post-resolution" an hour BEFORE
+// the cron actually fired, falsely showing "today's results in" while
+// users' bets were still unresolved.
+const RESOLUTION_UTC_HOUR = 21;
+const RESOLUTION_UTC_MIN = 15;
 // Bet window now locks at 1 PM ET (= 10 AM PT). See ADR 0008.
 // Lets users bet through morning + early-afternoon trading on the day,
 // not just the 8 PM → 9:15 AM dead-of-night window. Late bettors trade
@@ -207,12 +215,17 @@ export function getMarketSchedule(now: Date = new Date()): MarketSchedule {
     MARKET_CLOSE_HOUR_ET,
     0,
   );
-  const resolutionToday = fromET(
-    todayDate.year,
-    todayDate.month,
-    todayDate.day,
-    RESOLUTION_HOUR_ET,
-    RESOLUTION_MIN_ET,
+  // Resolution time: anchor in UTC (matches the cron exactly), not in ET
+  // wall clock. ET formatting still works via formatET(); the underlying
+  // Date is the same instant the cron fires at, regardless of DST.
+  const resolutionToday = new Date(
+    Date.UTC(
+      todayDate.year,
+      todayDate.month - 1, // JS Date is 0-indexed for months
+      todayDate.day,
+      RESOLUTION_UTC_HOUR,
+      RESOLUTION_UTC_MIN,
+    ),
   );
   // Determine which trading day current insights apply to.
   let tradingDate: Date;

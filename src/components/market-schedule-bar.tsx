@@ -222,14 +222,20 @@ function MarketStateLabel({
   state: MarketSchedule["state"];
   schedule: MarketSchedule;
 }) {
+  // Pull resolution time off the schedule (already DST-correct, ET-formatted)
+  // instead of hardcoding "4:15 PM" — the cron actually fires at 5:15 PM EDT
+  // during summer and 4:15 PM EST during winter; hardcoded copy lied during
+  // EDT, claiming results were in an hour before the cron actually fired.
+  const resolutionLabel = formatET(schedule.resolutionAt);
+
   if (state === "open") {
-    return <>Market is open · resolution at 4:15 PM ET</>;
+    return <>Market is open · resolution at {resolutionLabel}</>;
   }
   if (state === "pre-market") {
     return <>Pre-market · opens 9:30 AM ET</>;
   }
   if (state === "post-close") {
-    return <>Market closed · resolution ran at 4:15 PM</>;
+    return <>Market closed · resolution at {resolutionLabel}</>;
   }
   // weekend
   return <>Markets closed · {formatRelative(schedule.nextPipelineRun)} until next pipeline run</>;
