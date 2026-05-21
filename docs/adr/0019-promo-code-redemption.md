@@ -109,7 +109,9 @@ Why not a `role` column on `user_profiles`?
 ### Service-role client for admin writes
 
 Admin writes go through `createAdminClient()` (new `src/lib/supabase/service.ts`)
-which uses `SUPABASE_SERVICE_ROLE_KEY` and bypasses RLS. Pattern:
+which uses `SUPABASE_SERVICE_KEY` (same env var the Python pipeline
+already reads — single source of truth for the Supabase service-role
+secret) and bypasses RLS. Pattern:
 - Server action authenticates the user with the regular client
 - Checks `isAdminEmail(user.email)`
 - Then uses the admin client for the actual table write
@@ -170,7 +172,7 @@ client `<CodesAdminPanel>` that handles:
 | Env var | Default | Where set |
 |---|---|---|
 | `ADMIN_EMAILS` | (unset → no admins) | Vercel + GH Actions |
-| `SUPABASE_SERVICE_ROLE_KEY` | required for admin | Vercel + GH Actions |
+| `SUPABASE_SERVICE_KEY` | required for admin | Vercel + GH Actions (shared with pipeline) |
 | `DAILY_PROMO_CAP` (constant in code) | 1000 | `src/lib/promo-codes.ts` + RPC `v_daily_cap` |
 
 ## Files

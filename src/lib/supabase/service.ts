@@ -11,19 +11,21 @@ import { SUPABASE_URL } from "./env";
  *   2. Reading tables that have no read policy for the caller's role
  *      (e.g. admin listing all promo codes including inactive ones).
  *
- * SUPABASE_SERVICE_ROLE_KEY must be set in the server environment. Because
- * it has no NEXT_PUBLIC_ prefix, Next.js will refuse to inline it into the
- * browser bundle — a client component that imports this module would crash
- * at runtime when reaching process.env (which becomes undefined). Still,
+ * SUPABASE_SERVICE_KEY must be set in the server environment. (Variable
+ * name matches the existing convention used by the Python pipeline — same
+ * underlying Supabase service-role secret.) Because it has no
+ * NEXT_PUBLIC_ prefix, Next.js will refuse to inline it into the browser
+ * bundle — a client component that imports this module would crash at
+ * runtime when reaching process.env (which becomes undefined). Still,
  * only call createAdminClient() from "use server" modules or server
  * components.
  */
 export function createAdminClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_KEY;
   if (!key) {
     throw new Error(
-      "Missing SUPABASE_SERVICE_ROLE_KEY in server env. " +
-        "Admin operations require the service-role key.",
+      "Missing SUPABASE_SERVICE_KEY in server env. " +
+        "Admin operations require the Supabase service-role key.",
     );
   }
   return createSupabaseClient(SUPABASE_URL, key, {
