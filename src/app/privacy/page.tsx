@@ -29,7 +29,7 @@ export default function PrivacyPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Privacy</h1>
         <p className="text-muted-foreground text-sm">
-          Last updated: 2026-05-20 · Effective immediately.
+          Last updated: 2026-05-20 (avatar display) · Effective immediately.
         </p>
       </header>
 
@@ -62,7 +62,12 @@ export default function PrivacyPage() {
           <ul className="text-muted-foreground ml-6 list-disc space-y-1.5">
             <li>Your email address</li>
             <li>Your display name</li>
-            <li>Your profile picture URL (we do not currently display this)</li>
+            <li>
+              Your profile picture URL — displayed as your avatar in the app header dropdown and on
+              your profile page. The image itself stays on Google&apos;s CDN; we don&apos;t copy it,
+              proxy it, or store it. If the URL expires or you revoke OAuth access, the avatar falls
+              back to a single-letter chip.
+            </li>
             <li>An anonymous Google user ID we use to recognize you on return visits</li>
           </ul>
           <p className="text-muted-foreground">That is the entire list. We do not request, and Google does not share:</p>
@@ -95,6 +100,13 @@ export default function PrivacyPage() {
             with row-level security policies enforced at the database — meaning only your own account session can
             read your bets, balance, and feedback. Even a bug in our server code cannot return another user&apos;s
             data; the database itself refuses.
+          </p>
+          <p className="text-muted-foreground">
+            <span className="text-foreground">What we deliberately don&apos;t store:</span> your
+            Google profile picture URL. It travels with your sign-in token and is read on every page
+            render to display the avatar — never copied into our database. When you sign out (or
+            revoke OAuth access via your Google account), it&apos;s gone from our side immediately
+            with no cleanup required.
           </p>
         </section>
 
