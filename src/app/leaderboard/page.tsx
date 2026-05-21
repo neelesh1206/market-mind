@@ -13,14 +13,34 @@ import { LeaderboardTable } from "@/components/leaderboard-table";
 export const metadata = { title: "Leaderboard" };
 
 export default async function LeaderboardPage() {
+  // Temporary instrumentation — /leaderboard has been returning a generic
+  // Vercel "server error" with the specific message redacted in production.
+  // Logging at each step so the next visit pinpoints which call dies.
+  // Remove once the root cause is found and fixed.
+  console.log("[leaderboard] page-start");
+
   const supabase = await createClient();
+  console.log("[leaderboard] supabase-client-ready");
+
   const { data: claims, error: authErr } = await supabase.auth.getClaims();
+  console.log("[leaderboard] claims-fetched", {
+    hasClaims: !!claims?.claims,
+    hasError: !!authErr,
+  });
   if (authErr || !claims?.claims) {
     redirect("/login");
   }
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
-  const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
+  console.log("[leaderboard] basic-fields-extracted", { userId: userId?.slice(0, 8) });
+
+  let avatarUrl: string | null = null;
+  try {
+    avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
+    console.log("[leaderboard] avatar-extracted", { hasAvatar: !!avatarUrl });
+  } catch (e) {
+    console.error("[leaderboard] avatar-extract-failed:", e);
+  }
 
   // Promise.allSettled (vs all) — if any single read throws, the page still
   // renders. A leaderboard read failure shouldn't 500 the entire page when
@@ -56,11 +76,19 @@ export default async function LeaderboardPage() {
     console.error("[leaderboard] snapshot fetch failed:", snapshotSettled.reason);
   }
 
+  console.log("[leaderboard] data-resolved", {
+    profileOk: profileSettled.status === "fulfilled",
+    watchlistOk: watchlistSettled.status === "fulfilled",
+    snapshotOk: snapshotSettled.status === "fulfilled",
+    rowCount: snapshot.rows.length,
+  });
+
   const profile = profileRes.data;
   const credits = profile?.credit_balance ?? 0;
   const name = profile?.display_name ?? email;
 
   const weekLabel = snapshot.weekStart ? formatWeekRange(snapshot.weekStart) : null;
+  console.log("[leaderboard] about-to-render", { credits, name: name?.slice(0, 20), weekLabel });
 
   return (
     <div className="flex min-h-screen flex-col">
