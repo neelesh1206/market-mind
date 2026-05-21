@@ -193,7 +193,14 @@ async def run(args: argparse.Namespace) -> int:
         else:
             log.warning("fred_failed err=%s", result.error)
 
-    stats = {"processed": 0, "sources_succeeded": 0, "sources_failed": 0, "errors": []}
+    stats = {
+        "processed": 0,
+        "sources_succeeded": 0,
+        "sources_failed": 0,
+        "errors": [],
+        "tail_retry_count": 0,
+        "tail_retry_recovered": 0,
+    }
 
     # Inter-stock pacing — Massive's news endpoint throttles when we hammer
     # 50 stocks back-to-back. A 1.2s sleep between stocks keeps us under any
@@ -201,11 +208,31 @@ async def run(args: argparse.Namespace) -> int:
     # minutes. The first stock has no pre-sleep.
     INTER_STOCK_SLEEP_SECONDS = 1.2
 
+    # Tail-retry config. Sources in this set are HTTP-bound to rate-limited
+    # vendors — when they fail in the first pass, we want a second shot
+    # after letting the rate-limit window cool down. yfinance / insider /
+    # apewisdom rarely 429 but are still recoverable; they're included so
+    # a transient blip on any of them also gets a retry.
+    RETRYABLE_SOURCES = {"news", "analyst", "earnings", "stocktwits", "apewisdom", "reddit"}
+    # Pre-pause before the tail pass. Long enough to let Massive's per-second
+    # bucket reset (their published behavior is sub-minute) without dragging
+    # total runtime appreciably. Skipped when there are zero tail items.
+    TAIL_RETRY_PRE_SLEEP = 30.0
+    # Slower pacing during retry — at this scale (typically <10 stocks
+    # retrying) speed doesn't matter and extra breathing room reduces the
+    # odds of a second-pass 429.
+    TAIL_RETRY_INTER_STOCK_SLEEP = 3.0
+
+    # Stocks whose first-pass had at least one retryable failure. We re-run
+    # the FULL pipeline for these at the end — upsert semantics mean the
+    # retry overwrites cleanly if it succeeds.
+    tail_retry_stocks: list[tuple[StockRow, set[str]]] = []
+
     for idx, stock in enumerate(stocks):
         if idx > 0:
             await asyncio.sleep(INTER_STOCK_SLEEP_SECONDS)
         try:
-            await _process_stock(
+            failed_sources = await _process_stock(
                 stock=stock,
                 target_date=target_date,
                 supabase=supabase,
@@ -226,10 +253,66 @@ async def run(args: argparse.Namespace) -> int:
                 log=log,
             )
             stats["processed"] += 1
+            retryable_failed = failed_sources & RETRYABLE_SOURCES
+            if retryable_failed:
+                tail_retry_stocks.append((stock, retryable_failed))
         except Exception as e:  # noqa: BLE001
             capture_error(e, ticker=stock.ticker)
             log.exception("stock_failed ticker=%s", stock.ticker)
             stats["errors"].append({"ticker": stock.ticker, "error": str(e)})
+
+    # Tail-retry pass — second shot at stocks whose retryable sources
+    # (typically Massive news 429) failed in the first pass. Capped to
+    # one retry; if it fails again we accept the partial result and move
+    # on (the verdict was still computed without the failed bucket).
+    if tail_retry_stocks and not (cfg.dry_run or args.dry_run):
+        log.info(
+            "tail_retry_start count=%s tickers=%s pre_sleep=%.1fs",
+            len(tail_retry_stocks),
+            [s.ticker for s, _ in tail_retry_stocks],
+            TAIL_RETRY_PRE_SLEEP,
+        )
+        await asyncio.sleep(TAIL_RETRY_PRE_SLEEP)
+        stats["tail_retry_count"] = len(tail_retry_stocks)
+        for idx, (stock, prev_failed) in enumerate(tail_retry_stocks):
+            if idx > 0:
+                await asyncio.sleep(TAIL_RETRY_INTER_STOCK_SLEEP)
+            try:
+                still_failed = await _process_stock(
+                    stock=stock,
+                    target_date=target_date,
+                    supabase=supabase,
+                    dry_run=cfg.dry_run or args.dry_run,
+                    price_fetcher=price_fetcher,
+                    news_fetcher=news_fetcher,
+                    analyst_fetcher=analyst_fetcher,
+                    earnings_fetcher=earnings_fetcher,
+                    insider_fetcher=insider_fetcher,
+                    stocktwits_fetcher=stocktwits_fetcher,
+                    apewisdom_fetcher=apewisdom_fetcher,
+                    reddit_fetcher=reddit_fetcher,
+                    sentiment_processor=sentiment_processor,
+                    summarizer=summarizer,
+                    verdict_reasoner=verdict_reasoner,
+                    macro=macro,
+                    stats=stats,
+                    log=log,
+                )
+                recovered = prev_failed - (still_failed & RETRYABLE_SOURCES)
+                if recovered:
+                    stats["tail_retry_recovered"] += 1
+                    log.info(
+                        "tail_retry_recovered ticker=%s sources=%s",
+                        stock.ticker, sorted(recovered),
+                    )
+                else:
+                    log.warning(
+                        "tail_retry_still_failed ticker=%s sources=%s",
+                        stock.ticker, sorted(still_failed & RETRYABLE_SOURCES),
+                    )
+            except Exception as e:  # noqa: BLE001
+                capture_error(e, ticker=stock.ticker)
+                log.exception("tail_retry_failed ticker=%s", stock.ticker)
 
     # Cross-sectional ranking pass (ADR 0015). Runs after all per-stock
     # work is done. Skipped in dry-run since there's nothing in the DB
@@ -266,11 +349,13 @@ async def run(args: argparse.Namespace) -> int:
     hf = _hf_snapshot()
     log.info(
         "pipeline_done status=%s processed=%s ok=%s failed=%s "
-        "hf_tripped=%s hf_skipped=%s",
+        "tail_retried=%s tail_recovered=%s hf_tripped=%s hf_skipped=%s",
         status,
         stats["processed"],
         stats["sources_succeeded"],
         stats["sources_failed"],
+        stats["tail_retry_count"],
+        stats["tail_retry_recovered"],
         hf["tripped"],
         hf["skipped"],
     )
@@ -297,7 +382,14 @@ async def _process_stock(
     macro: MacroSnapshot | None,
     stats: dict[str, Any],
     log: logging.Logger,
-) -> None:
+) -> set[str]:
+    """Run one stock through the full fetch + score + write pipeline.
+
+    Returns the set of source names that failed for this stock (e.g.
+    {"news"}). Empty set on a fully-clean run. The caller uses this to
+    schedule a tail-retry pass for the failed stocks — see the
+    "retry-the-tail" block in `run()`.
+    """
     log.info("stock_start ticker=%s", stock.ticker)
 
     # Parallel fetch across sources.
@@ -325,16 +417,22 @@ async def _process_stock(
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     results: dict[str, FetchResult[Any]] = {}
+    # Track which sources failed for the caller's tail-retry decision.
+    # Includes both hard exceptions and non-success FetchResult.status
+    # (timeout / 429 after retries / explicit failure).
+    failed_sources: set[str] = set()
     for label, res in zip(labels, raw_results, strict=False):
         if isinstance(res, BaseException):
             log.warning("fetcher_exception label=%s ticker=%s err=%s", label, stock.ticker, res)
             stats["sources_failed"] += 1
+            failed_sources.add(label)
             continue
         results[label] = res
         if res.status == "success":
             stats["sources_succeeded"] += 1
         else:
             stats["sources_failed"] += 1
+            failed_sources.add(label)
 
     # Unpack typed results (None if missing/failed).
     price: PriceSnapshot | None = _data(results.get("price"))
@@ -406,7 +504,9 @@ async def _process_stock(
 
     if dry_run:
         log.info("dry_run_payload ticker=%s scores=%s", stock.ticker, _scores_repr(buckets))
-        return
+        # Return the same shape as the success path so the caller's
+        # tail-retry collection doesn't have to special-case None.
+        return failed_sources
 
     inserted = upsert_stock_insight(supabase, payload)
     insight_id = inserted["id"]
@@ -508,6 +608,8 @@ async def _process_stock(
         verdict.vol_factor,
         verdict.adjusted_threshold,
     )
+
+    return failed_sources
 
 
 def _rank_universe(supabase: Any, target_date: str, log: logging.Logger) -> None:
