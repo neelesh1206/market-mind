@@ -1,3 +1,4 @@
+import { isValidElement } from "react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,14 +68,23 @@ export function EmptyState({
 }
 
 function EmptyIcon({ icon }: { icon: LucideIcon | React.ReactNode }) {
-  // LucideIcon is a functional component; ReactNode is anything else. We
-  // wrap the icon in the same sized circle either way so all empty states
-  // share the same visual weight regardless of source.
+  // Two valid inputs:
+  //   1. A LucideIcon component reference (e.g. `icon={Trophy}`) — we need
+  //      to render it as `<Trophy />`.
+  //   2. An already-rendered React element (e.g. `icon={<MyCustom />}`).
+  //
+  // Discriminate via `isValidElement` (NOT `typeof === "function"`):
+  // Lucide icons in v0.5+ are `React.forwardRef` objects, which means
+  // `typeof === "object"`, not `"function"`. The old check fell through
+  // to the else branch and rendered the bare forwardRef object as a
+  // child of <div>, which React's RSC serializer rejects with
+  // "Functions are not valid as a child of Client Components."
+  // `isValidElement` returns true ONLY for things React can render as-is;
+  // forwardRef component references return false → we invoke them via
+  // renderLucide.
   return (
     <div className="border-border/60 bg-card text-muted-foreground flex h-12 w-12 items-center justify-center rounded-full border">
-      {typeof icon === "function"
-        ? renderLucide(icon as LucideIcon)
-        : (icon as React.ReactNode)}
+      {isValidElement(icon) ? icon : renderLucide(icon as LucideIcon)}
     </div>
   );
 }
