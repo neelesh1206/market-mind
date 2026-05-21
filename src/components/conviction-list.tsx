@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDown, ArrowRight, ArrowUp, Star, TrendingUp } from "lucide-react";
+import { Star, Target, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ConvictionEntry } from "@/lib/feed";
 
@@ -8,7 +8,27 @@ type Props = {
   short: ConvictionEntry[];
   /** Tickers in the current user's watchlist — flagged with a star + tone shift. */
   watchlistTickers: Set<string>;
+  /**
+   * The trading day these predictions target, as ISO date string ("2026-05-21").
+   * Rendered as a `Thu, May 21` badge so users know they're looking at a
+   * *forecast* for that session — not the stock's current price action.
+   */
+  predictionDate: string;
 };
+
+/**
+ * Format a YYYY-MM-DD trading-day label as "Thu, May 21" anchored to ET.
+ * We pin the parse to 1 PM UTC so DST transitions don't accidentally flip
+ * the date during the format step.
+ */
+function formatPredictionDate(isoDate: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "America/New_York",
+  }).format(new Date(`${isoDate}T13:00:00Z`));
+}
 
 /**
  * "Today's conviction" — surfaces MarketMind's strongest reads across the
@@ -26,7 +46,9 @@ type Props = {
  * Renders nothing if both sides are empty — caller decides whether to
  * show a placeholder instead (e.g. before the day's pipeline ranks).
  */
-export function ConvictionList({ long, short, watchlistTickers }: Props) {
+export function ConvictionList({ long, short, watchlistTickers, predictionDate }: Props) {
+  const dateLabel = formatPredictionDate(predictionDate);
+
   if (long.length === 0 && short.length === 0) {
     return (
       <section className="border-border/60 bg-card/30 space-y-2 rounded-xl border p-5">
@@ -44,14 +66,23 @@ export function ConvictionList({ long, short, watchlistTickers }: Props) {
 
   return (
     <section className="space-y-3">
-      <header className="space-y-1">
-        <div className="flex items-center gap-2">
+      <header className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           <TrendingUp className="text-muted-foreground h-4 w-4" aria-hidden />
           <h2 className="text-sm font-semibold">Today&apos;s conviction</h2>
+          {/* Date pill — anchors the list as a *forecast* for a specific session,
+              not current price action. Closes the "is this today's % move?" gap. */}
+          <span
+            className="border-border/60 bg-card/40 text-muted-foreground inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+            title={`MarketMind's predictions for the ${dateLabel} trading session`}
+          >
+            For {dateLabel}
+          </span>
         </div>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          MarketMind&apos;s strongest reads ranked across the full 50-stock universe. Stars
-          mark stocks already on your watchlist.
+          MarketMind&apos;s strongest reads ranked across the full 50-stock universe. These are
+          model forecasts for the session above, not today&apos;s price moves. Stars mark stocks
+          already on your watchlist.
         </p>
       </header>
 
@@ -113,9 +144,6 @@ function ConvictionColumn({
 }
 
 function ConvictionRow({ entry, isWatching }: { entry: ConvictionEntry; isWatching: boolean }) {
-  const Icon =
-    entry.direction === "UP" ? ArrowUp : entry.direction === "DOWN" ? ArrowDown : ArrowRight;
-
   const directionTone =
     entry.direction === "UP"
       ? "text-emerald-600 dark:text-emerald-400"
@@ -123,12 +151,10 @@ function ConvictionRow({ entry, isWatching }: { entry: ConvictionEntry; isWatchi
         ? "text-red-600 dark:text-red-400"
         : "text-muted-foreground";
 
-  const scoreTone =
-    entry.combined_score > 0
-      ? "text-emerald-600 dark:text-emerald-400"
-      : entry.combined_score < 0
-        ? "text-red-600 dark:text-red-400"
-        : "text-muted-foreground";
+  // Score reads "score 0.52" — dropping the leading `+` for positives so it
+  // stops mimicking a percent move. Sign is preserved on negatives because
+  // a negative score genuinely is on the "down" side of the model.
+  const scoreText = entry.combined_score.toFixed(2);
 
   return (
     <li>
@@ -165,15 +191,19 @@ function ConvictionRow({ entry, isWatching }: { entry: ConvictionEntry; isWatchi
           <p className="text-muted-foreground truncate text-[11px] leading-tight">{entry.name}</p>
         </div>
 
-        {/* Direction + combined_score */}
+        {/* Forecast verdict + score.
+            Single `Target` icon signals "this is a forecast" — replaces the
+            ArrowUp/Down/Right icons that visually mimicked price-movement
+            indicators. Color on the UP/DOWN/NEUTRAL label still carries the
+            directional cue. Score prefixed with "score " so it doesn't read
+            like a percent. */}
         <div className="flex shrink-0 items-center gap-2">
-          <span className={cn("inline-flex items-center gap-0.5 text-xs font-medium", directionTone)}>
-            <Icon className="h-3 w-3" aria-hidden />
+          <span className={cn("inline-flex items-center gap-1 text-xs font-medium", directionTone)}>
+            <Target className="h-3 w-3" aria-hidden />
             {entry.direction}
           </span>
-          <span className={cn("font-mono text-xs tabular-nums", scoreTone)}>
-            {entry.combined_score >= 0 ? "+" : ""}
-            {entry.combined_score.toFixed(2)}
+          <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
+            score <span className={cn(entry.combined_score < 0 && "text-foreground/80")}>{scoreText}</span>
           </span>
         </div>
       </Link>

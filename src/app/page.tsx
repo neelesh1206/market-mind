@@ -159,6 +159,7 @@ export default async function Home() {
           long={conviction.long}
           short={conviction.short}
           watchlistTickers={watchlistTickers}
+          predictionDate={schedule.tradingDayLabel}
         />
 
         {/* Quick stats row */}
