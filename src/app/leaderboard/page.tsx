@@ -22,7 +22,10 @@ export default async function LeaderboardPage() {
   const email = (claims.claims.email ?? userId) as string;
   const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
 
-  const [profileRes, watchlist, snapshot] = await Promise.all([
+  // Promise.allSettled (vs all) — if any single read throws, the page still
+  // renders. A leaderboard read failure shouldn't 500 the entire page when
+  // we have a perfectly good "no qualifiers yet" empty-state to display.
+  const [profileSettled, watchlistSettled, snapshotSettled] = await Promise.allSettled([
     supabase
       .from("user_profiles")
       .select("display_name, credit_balance")
@@ -31,6 +34,27 @@ export default async function LeaderboardPage() {
     fetchUserWatchlist(supabase, userId),
     fetchLatestLeaderboard(supabase, 20),
   ]);
+
+  const profileRes =
+    profileSettled.status === "fulfilled" ? profileSettled.value : { data: null };
+  const watchlist =
+    watchlistSettled.status === "fulfilled" ? watchlistSettled.value : [];
+  const snapshot =
+    snapshotSettled.status === "fulfilled"
+      ? snapshotSettled.value
+      : { weekStart: null, rows: [] };
+
+  // Log any failed fetches so we can see them in Vercel logs without
+  // 500'ing the page render.
+  if (profileSettled.status === "rejected") {
+    console.error("[leaderboard] user_profiles fetch failed:", profileSettled.reason);
+  }
+  if (watchlistSettled.status === "rejected") {
+    console.error("[leaderboard] watchlist fetch failed:", watchlistSettled.reason);
+  }
+  if (snapshotSettled.status === "rejected") {
+    console.error("[leaderboard] snapshot fetch failed:", snapshotSettled.reason);
+  }
 
   const profile = profileRes.data;
   const credits = profile?.credit_balance ?? 0;
