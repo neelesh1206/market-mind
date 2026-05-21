@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InsightArticle, MarketMindPrediction, StockInsight } from "@/types/insight";
+import { isArticleRelevant } from "@/lib/articles";
 import { computeSyntheticVerdict } from "@/lib/verdict";
 
 export type StockDetail = {
@@ -75,7 +76,9 @@ export async function fetchStockDetail(
     } else {
       verdict = (verdictRes.data as MarketMindPrediction | null) ?? null;
     }
-    articles = (articlesRes.data ?? []) as InsightArticle[];
+    // Filter out off-topic articles (LLM's TL;DR explicitly said the stock
+    // isn't the subject). See src/lib/articles.ts for the criteria.
+    articles = ((articlesRes.data ?? []) as InsightArticle[]).filter(isArticleRelevant);
   }
 
   // Fall back to a client-computed verdict when no stored row exists

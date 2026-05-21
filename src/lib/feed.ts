@@ -5,6 +5,7 @@ import type {
   StockCardData,
   StockInsight,
 } from "@/types/insight";
+import { pickTopRelevantArticle } from "@/lib/articles";
 import { computeSyntheticVerdict } from "@/lib/verdict";
 import { wilsonInterval } from "@/lib/wilson";
 
@@ -49,7 +50,10 @@ export async function fetchHomeFeed(
     }
   }
 
-  // Fetch top articles (display_rank=1) for those insights in one round-trip.
+  // Fetch top-3 articles per insight so we can pick the highest-ranked
+  // *relevant* one — the rank-1 article is occasionally off-topic (sector
+  // pieces, comparables) and would leave the card with no article block if
+  // we only fetched display_rank=1. Top-3 is plenty of fallback at 3x rows.
   const insightIds = Array.from(latestByStock.values()).map((i) => i.id);
   const articleByInsight = new Map<string, InsightArticle>();
   const verdictByStock = new Map<string, MarketMindPrediction>();
@@ -59,7 +63,7 @@ export async function fetchHomeFeed(
         .from("insight_articles")
         .select("*")
         .in("insight_id", insightIds)
-        .eq("display_rank", 1),
+        .lte("display_rank", 3),
       // Defensive: the marketmind_predictions table is a recent migration;
       // a missing-table error here shouldn't 500 the whole feed.
       client.from("marketmind_predictions").select("*").in("insight_id", insightIds),
@@ -76,8 +80,16 @@ export async function fetchHomeFeed(
         verdictByStock.set(row.stock_id, row);
       }
     }
+    // Bucket by insight_id, then pick the first relevant article per insight.
+    const articlesByInsight = new Map<string, InsightArticle[]>();
     for (const row of (articlesRes.data ?? []) as InsightArticle[]) {
-      articleByInsight.set(row.insight_id, row);
+      const arr = articlesByInsight.get(row.insight_id) ?? [];
+      arr.push(row);
+      articlesByInsight.set(row.insight_id, arr);
+    }
+    for (const [insightId, arr] of articlesByInsight) {
+      const top = pickTopRelevantArticle(arr);
+      if (top) articleByInsight.set(insightId, top);
     }
   }
 
@@ -314,7 +326,8 @@ export async function fetchTopVerdictsForPreview(
   const insightIds = rows.map((r) => r.insight_id);
   const [insightRes, articleRes] = await Promise.all([
     client.from("stock_insights").select("*").in("id", insightIds),
-    client.from("insight_articles").select("*").in("insight_id", insightIds).eq("display_rank", 1),
+    // Fetch top-3 per insight so we can fall back when rank-1 is off-topic.
+    client.from("insight_articles").select("*").in("insight_id", insightIds).lte("display_rank", 3),
   ]);
 
   const insightById = new Map<string, StockInsight>();
@@ -322,8 +335,17 @@ export async function fetchTopVerdictsForPreview(
     insightById.set(row.id, row);
   }
   const articleByInsight = new Map<string, InsightArticle>();
-  for (const row of (articleRes.data ?? []) as InsightArticle[]) {
-    articleByInsight.set(row.insight_id, row);
+  {
+    const grouped = new Map<string, InsightArticle[]>();
+    for (const row of (articleRes.data ?? []) as InsightArticle[]) {
+      const arr = grouped.get(row.insight_id) ?? [];
+      arr.push(row);
+      grouped.set(row.insight_id, arr);
+    }
+    for (const [insightId, arr] of grouped) {
+      const top = pickTopRelevantArticle(arr);
+      if (top) articleByInsight.set(insightId, top);
+    }
   }
 
   return rows
