@@ -42,9 +42,12 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/public");
-  // Public pages — readable without auth. /about is the trust/methodology page;
-  // shared stock links could land here too, so we let unauthed visitors read.
-  const isPublicPage = pathname === "/about";
+  // Public pages — readable without auth. /about is the trust/methodology
+  // page; /privacy is required by Google's OAuth consent screen verifier
+  // to be reachable from the home page (which for unauth visitors is /login).
+  // Shared stock links could land users on /about, so we let unauthed
+  // visitors read both.
+  const isPublicPage = pathname === "/about" || pathname === "/privacy";
 
   // OG image routes MUST be public — social link unfurlers (Twitter, LinkedIn,
   // Slack, iMessage, etc.) crawl them without any cookies. If we redirect to
