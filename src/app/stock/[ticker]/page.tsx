@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Calendar, TrendingUp } from "lucide-react";
+import { CreditsChip } from "@/components/credits-chip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileMenu } from "@/components/profile-menu";
 import { SignalDetail } from "@/components/signal-detail";
@@ -146,15 +147,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
           </Link>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {!isAnon && (
-              <div className="border-border/60 bg-card/40 flex items-center gap-2 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                <span className="text-xs font-medium tabular-nums">
-                  {credits.toLocaleString()}
-                  <span className="text-muted-foreground hidden sm:inline"> credits</span>
-                </span>
-              </div>
-            )}
+            {!isAnon && <CreditsChip credits={credits} />}
             <ThemeToggle />
             {isAnon ? (
               <Link

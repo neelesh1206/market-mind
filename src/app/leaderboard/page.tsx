@@ -4,6 +4,7 @@ import { ArrowLeft, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchLatestLeaderboard } from "@/lib/leaderboard";
+import { CreditsChip } from "@/components/credits-chip";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LeaderboardTable } from "@/components/leaderboard-table";
@@ -47,13 +48,7 @@ export default async function LeaderboardPage() {
             <span>Back to feed</span>
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="border-border/60 bg-card/40 flex items-center gap-2 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span className="text-xs font-medium tabular-nums">
-                {credits.toLocaleString()}
-                <span className="text-muted-foreground hidden sm:inline"> credits</span>
-              </span>
-            </div>
+            <CreditsChip credits={credits} />
             <ThemeToggle />
             <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
           </div>

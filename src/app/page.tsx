@@ -8,6 +8,7 @@ import { getDailyBonusStatus } from "@/lib/bonus";
 import { getLivePrices } from "@/lib/live-prices";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { ConvictionList } from "@/components/conviction-list";
+import { CreditsChip } from "@/components/credits-chip";
 import { MarketScheduleBar } from "@/components/market-schedule-bar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -107,13 +108,7 @@ export default async function Home() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="border-border/60 bg-card/40 flex items-center gap-2 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span className="text-xs font-medium tabular-nums">
-                {credits.toLocaleString()}
-                <span className="text-muted-foreground hidden sm:inline"> credits</span>
-              </span>
-            </div>
+            <CreditsChip credits={credits} />
             <ThemeToggle />
             <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
           </div>

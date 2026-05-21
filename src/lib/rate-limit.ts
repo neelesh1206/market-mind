@@ -56,6 +56,16 @@ const LIMITERS: Record<string, { requests: number; windowSec: number }> = {
   // (validation), so we throttle more conservatively than other write actions.
   // 10/min covers a user exploring + submitting 3-4 requests in a sitting.
   submitStockRequest: { requests: 10, windowSec: 60 },
+
+  // Promo-code redemption — tight cap because the failure path tells the
+  // attacker whether a code exists, so this is the rate-limit that throttles
+  // brute force of valid codes. 5/min is plenty for the legitimate "I
+  // mistyped" retry path.
+  redeemCode: { requests: 5, windowSec: 60 },
+
+  // Admin promo-code create. Admin-only via ADMIN_EMAILS — generous because
+  // the action is gated behind that check; 20/min is more than enough.
+  createPromoCode: { requests: 20, windowSec: 60 },
 };
 
 // Cache constructed limiters so we don't rebuild on every check.
