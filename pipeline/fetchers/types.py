@@ -33,16 +33,32 @@ class PriceSnapshot:
 
 @dataclass
 class NewsArticle:
-    """Single news item — sentiment + summary fields populated downstream."""
+    """Single news item — sentiment + summary fields populated downstream.
+
+    Fields populated by the fetcher:
+      headline, url, source, published_at, body
+      massive_sentiment / massive_sentiment_reasoning — Polygon's per-ticker
+        insight from /v2/reference/news's insights array. Only attached
+        when the article specifically discusses our target ticker;
+        articles without a per-ticker insight are dropped at the fetcher
+        (see ADR 0020).
+
+    Fields populated by the processor pipeline:
+      sentiment — blended FinBERT + Polygon score in [-1, +1]
+      tldr / summary / signal_influence — LLM-generated, seeded with
+        massive_sentiment_reasoning when available
+    """
     headline: str
     url: str
     source: str
     published_at: datetime | None
     body: str | None = None
-    sentiment: float | None = None              # set by FinBERT processor
+    sentiment: float | None = None              # blended (FinBERT + Polygon)
     tldr: str | None = None                     # one sentence, < 140 chars, for card glance
     summary: str | None = None                  # 2-3 sentences, paragraph
     signal_influence: str | None = None         # one sentence: how this affects sentiment direction
+    massive_sentiment: Literal["positive", "negative", "neutral"] | None = None
+    massive_sentiment_reasoning: str | None = None
 
 
 @dataclass

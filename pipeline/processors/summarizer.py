@@ -54,7 +54,20 @@ INFLUENCE: <one sentence, max 20 words, framed as Bullish/Bearish/Neutral and wh
 If the article is unrelated to {ticker} or has no signal value, write "Neutral — no direct signal" for INFLUENCE.
 
 Article headline: {headline}
-Article body: {body}"""
+Article body: {body}{seed_section}"""
+
+# Optional seed block appended when Polygon's per-ticker insight provides
+# a sentiment_reasoning string. Pre-tuned for {ticker} so the LLM can use
+# it as a starting point — refine into our voice + structure, don't just
+# echo it verbatim.
+SEED_TEMPLATE = """
+
+Polygon's per-ticker note (treat as a hint to refine, not as ground truth):
+"{seed}"
+Polygon's overall sentiment for {ticker} on this article: {sentiment}.
+
+Your job is still to produce the three labeled lines above in your own
+voice — but you can lean on the note when it captures the right framing."""
 
 LABEL_PATTERN = re.compile(
     r"^\s*(TLDR|SUMMARY|INFLUENCE)\s*:\s*(.+?)\s*$",
@@ -123,10 +136,21 @@ class LlamaSummarizer:
             _hf_breaker.record_skip()
             return
 
+        # Seed the LLM with Polygon's per-ticker insight when present
+        # (ADR 0020). The model already has a hint of what's relevant to
+        # this ticker; refine into our voice rather than write from scratch.
+        seed_section = ""
+        if article.massive_sentiment_reasoning:
+            seed_section = SEED_TEMPLATE.format(
+                seed=article.massive_sentiment_reasoning,
+                ticker=ticker,
+                sentiment=article.massive_sentiment or "unspecified",
+            )
         prompt = PROMPT_TEMPLATE.format(
             ticker=ticker,
             headline=article.headline,
             body=body or "(no body — use headline)",
+            seed_section=seed_section,
         )
 
         try:

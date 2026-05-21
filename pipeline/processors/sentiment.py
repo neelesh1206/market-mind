@@ -146,6 +146,69 @@ class FinBertSentimentProcessor:
 
 
 # ---------------------------------------------------------------------------
+# Polygon insights blend — ADR 0020.
+# ---------------------------------------------------------------------------
+
+
+def _polygon_to_numeric(sentiment: str | None) -> float | None:
+    """Map Polygon's categorical per-ticker sentiment to a numeric score
+    on FinBERT's scale (-1.0 to +1.0). Returns None for unrecognised input."""
+    if sentiment == "positive":
+        return 1.0
+    if sentiment == "negative":
+        return -1.0
+    if sentiment == "neutral":
+        return 0.0
+    return None
+
+
+def apply_polygon_blend(articles: list[NewsArticle]) -> int:
+    """Fold Polygon's per-ticker sentiment into each article's sentiment field.
+
+    Runs AFTER `FinBERTSentimentProcessor.score()` (which populates
+    `article.sentiment` with FinBERT's standalone read). For each article:
+
+      - If both FinBERT and Polygon sentiments are present → simple
+        average (equal weight). FinBERT brings a continuous score that
+        captures *how* bullish the article reads; Polygon brings a
+        categorical ticker-specific call that captures whether the
+        sentiment is genuinely directed at this ticker. Equal weighting
+        treats them as independent estimators of the same quantity.
+      - If only FinBERT → keep it (Polygon's insight was absent — rare
+        post-filter, e.g. malformed sentiment value).
+      - If only Polygon → use Polygon's numeric mapping (FinBERT may
+        have been skipped if the article has no body/headline text).
+
+    Returns the count of articles whose sentiment changed as a result of
+    the blend — useful for instrumentation when tuning the weighting.
+
+    Why equal weights (not weighted): we have no calibration data yet to
+    justify a specific weighting. Equal-weight is the right Bayesian-prior
+    default; ADR 0020 documents how to revisit with resolved-prediction
+    data once we have enough.
+    """
+    changed = 0
+    for article in articles:
+        polygon_num = _polygon_to_numeric(article.massive_sentiment)
+        finbert = article.sentiment
+
+        if finbert is None and polygon_num is None:
+            continue
+        if finbert is None:
+            article.sentiment = round(polygon_num, 3) if polygon_num is not None else None
+            changed += 1
+            continue
+        if polygon_num is None:
+            continue
+
+        blended = round((finbert + polygon_num) / 2, 3)
+        if blended != finbert:
+            article.sentiment = blended
+            changed += 1
+    return changed
+
+
+# ---------------------------------------------------------------------------
 # Aggregation helpers — unchanged from the API-based implementation.
 # ---------------------------------------------------------------------------
 

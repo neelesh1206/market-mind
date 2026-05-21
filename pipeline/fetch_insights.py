@@ -67,6 +67,7 @@ from .processors.ranking import rank_predictions
 from .processors.sentiment import (
     FinBertSentimentProcessor,
     aggregate_sentiment,
+    apply_polygon_blend,
     cross_source_agreement,
 )
 from .processors.summarizer import LlamaSummarizer
@@ -454,6 +455,18 @@ async def _process_stock(
         except Exception as e:  # noqa: BLE001
             log.warning("sentiment_failed ticker=%s err=%s", stock.ticker, e)
 
+    # Blend FinBERT + Polygon's per-ticker sentiment (ADR 0020).
+    # Runs unconditionally after FinBERT — handles the case where FinBERT
+    # was disabled or skipped articles for empty bodies but Polygon's
+    # categorical sentiment is still present.
+    if articles:
+        blended_count = apply_polygon_blend(articles)
+        if blended_count:
+            log.info(
+                "polygon_blend_applied ticker=%s count=%s",
+                stock.ticker, blended_count,
+            )
+
     # Llama-3 summarization for the top 3 articles by absolute sentiment.
     # We only summarize the ones we'll actually display — keeps inference cost down.
     if summarizer and articles:
@@ -533,6 +546,11 @@ async def _process_stock(
                     "summary": a.summary,
                     "signal_influence": a.signal_influence,
                     "display_rank": i + 1,
+                    # Polygon's raw per-ticker insight (ADR 0020). Stored
+                    # alongside the blended sentiment + LLM-refined TL;DR
+                    # for audit/debug + future blend re-tuning.
+                    "massive_sentiment": a.massive_sentiment,
+                    "massive_sentiment_reasoning": a.massive_sentiment_reasoning,
                 }
                 for i, a in enumerate(top_articles)
             ],

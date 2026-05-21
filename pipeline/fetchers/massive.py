@@ -56,7 +56,22 @@ class MassiveNewsFetcher(AbstractFetcher[list[NewsArticle]]):
 
         results = payload.get("results") or []
         articles: list[NewsArticle] = []
+        skipped_no_insight = 0
         for item in results:
+            # Per-ticker relevance gate (ADR 0020): Polygon attaches an
+            # `insights` array where each entry corresponds to a ticker
+            # the article actually discusses. An article tagged with our
+            # ticker but missing it from `insights` is just a passing
+            # mention (sector piece, adjacent-company M&A, etc.) — drop it.
+            insights = item.get("insights") or []
+            my_insight = next(
+                (i for i in insights if (i.get("ticker") or "").upper() == ticker.upper()),
+                None,
+            )
+            if my_insight is None:
+                skipped_no_insight += 1
+                continue
+
             published = item.get("published_utc")
             published_at = None
             if published:
@@ -65,6 +80,12 @@ class MassiveNewsFetcher(AbstractFetcher[list[NewsArticle]]):
                 except ValueError:
                     log.warning("bad_timestamp ticker=%s ts=%s", ticker, published)
 
+            sentiment = my_insight.get("sentiment")
+            # Only accept the three documented values; anything else gets
+            # treated as missing rather than blowing up downstream.
+            if sentiment not in ("positive", "negative", "neutral"):
+                sentiment = None
+
             articles.append(
                 NewsArticle(
                     headline=item.get("title") or "",
@@ -72,7 +93,14 @@ class MassiveNewsFetcher(AbstractFetcher[list[NewsArticle]]):
                     source=(item.get("publisher") or {}).get("name") or "Unknown",
                     published_at=published_at,
                     body=item.get("description"),
+                    massive_sentiment=sentiment,
+                    massive_sentiment_reasoning=my_insight.get("sentiment_reasoning"),
                 )
+            )
+        if skipped_no_insight:
+            log.info(
+                "massive_news_filtered ticker=%s kept=%s skipped_no_insight=%s",
+                ticker, len(articles), skipped_no_insight,
             )
         return articles
 

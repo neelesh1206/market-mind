@@ -13,11 +13,16 @@ export type InsightArticle = {
   url: string;
   source: string;
   published_at: string | null;
+  /** Blended FinBERT + Polygon score in [-1, +1] (ADR 0020). */
   sentiment: number | null;
   tldr: string | null;
   summary: string | null;
   signal_influence: string | null;
   display_rank: number | null;
+  /** Polygon's per-ticker categorical sentiment from /v2/reference/news. */
+  massive_sentiment: "positive" | "negative" | "neutral" | null;
+  /** Polygon's per-ticker free-text reasoning, used to seed the LLM TL;DR. */
+  massive_sentiment_reasoning: string | null;
 };
 
 export type StockInsight = {
