@@ -189,3 +189,61 @@ running both — a desirable property regardless of who triggered each.
 Operational steps for deploying the Worker and rotating credentials are
 in [workers/cron-trigger/README.md](../../workers/cron-trigger/README.md).
 This ADR captures the *why*; that README captures the *how*.
+
+## Amendment 2026-05-20 — DST behavior + Worker-redeploy discipline
+
+Two operational gotchas surfaced after the first month of production.
+Documenting both here so they don't have to be rediscovered.
+
+### Crons are fixed in UTC, wall-clock PT shifts ±1h with DST
+
+All schedule strings (`0 0 * * 2-6`, `15 21 * * 1-5`, etc.) are
+interpreted as UTC by Cloudflare. **They never adjust for daylight
+saving.** Concretely:
+
+| Cron expression | UTC time | ET wall clock | PT wall clock |
+|---|---|---|---|
+| `0 0 * * 2-6` (fetch-insights)     | 00:00 UTC Tue–Sat | **8 PM ET** Mon–Fri | 5 PM PDT / 4 PM PST |
+| `15 21 * * 1-5` (resolve)          | 21:15 UTC Mon–Fri | **5:15 PM ET** Mon–Fri | 2:15 PM PDT / 1:15 PM PST |
+| `0 23 * * SUN` (leaderboard)       | 23:00 UTC Sun    | **7 PM ET** Sun | 4 PM PDT / 3 PM PST |
+| `0 12 * * SUN` (stock rotation)    | 12:00 UTC Sun    | **8 AM ET** Sun | 5 AM PDT / 4 AM PST |
+
+**By design**, all UI copy anchors to **ET** (never PT), because:
+
+1. The market itself follows ET — anchoring the pipeline to ET keeps
+   the relationship consistent ("8 PM ET = 4 hours after the 4 PM
+   close, before the next bet window opens").
+2. ET → PT is a fixed 3-hour offset year-round (because both shift
+   together with DST), so a single ET label is correct in both
+   seasons.
+
+If a user mentally converts "8 PM ET" → "5 PM PT" they'll be right
+during DST and an hour off during EST. That's the user's mental
+conversion error, not a system bug. The system fires at the same UTC
+instant year-round; only the wall-clock label they apply to it shifts.
+
+Anyone tempted to "fix" the cron to fire at literal 5 PM PT year-round
+should re-read this section. It's not a fix — it's two new bugs
+(twice-yearly cron edit, or two crons that both fire during the DST
+overlap weeks).
+
+### Worker MUST be redeployed after wrangler.toml changes
+
+`wrangler.toml` edits do **not** propagate to the running Cloudflare
+Worker until `npx wrangler deploy` is run. Specifically, adding a new
+cron to `[triggers] crons = [...]` registers the schedule in source
+but doesn't activate it on Cloudflare's scheduler. Existing schedules
+from the prior deploy continue firing; new ones don't fire at all
+until deploy.
+
+On 2026-05-20 we added a 4th cron (`0 12 * * SUN` for stock rotation)
+in commit ec5eb22 but didn't immediately redeploy. The new schedule
+sat dormant. A separate transient hiccup also caused `fetch-insights`
+to miss its 5 PM PT fire that day. A clean redeploy reseated all 4
+schedules and resolved both.
+
+**Operational rule**: any commit that touches `workers/cron-trigger/`
+must be followed by `cd workers/cron-trigger && npx wrangler deploy`.
+A future task (#122 pipeline-health) will surface "last successful
+fire was N hours ago" so this gap becomes visible in-app instead of
+needing manual discovery.
