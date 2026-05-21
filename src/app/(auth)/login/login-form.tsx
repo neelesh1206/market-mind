@@ -85,20 +85,26 @@ export function LoginForm() {
               reassurance + a "Why it's safe" link to the privacy page.
               The privacy link is also load-bearing for Google's OAuth
               consent-screen verifier — they crawl this page looking for
-              a visible link to the policy URL we registered. */}
-          <div className="text-muted-foreground space-y-1.5 text-center text-[11px] leading-relaxed">
-            <p className="flex items-center justify-center gap-1.5">
-              <Lock className="h-3 w-3" aria-hidden />
-              <span>
-                We only read your name + email — never Gmail, Drive, or anything else
-              </span>
+              a visible link to the policy URL we registered.
+
+              Copy intentionally short (≤30 chars) so it never wraps at
+              the card's max-w-sm width. The longer disclaimer ("never
+              Gmail, Drive, or anything else") lives on /privacy — the
+              role of THIS surface is reassurance-at-a-glance, not the
+              full policy. */}
+          <div className="text-muted-foreground space-y-1 text-center text-[11px] leading-relaxed">
+            <p className="inline-flex items-center justify-center gap-1.5">
+              <Lock className="h-3 w-3 shrink-0" aria-hidden />
+              <span>Read-only · name and email only</span>
             </p>
-            <Link
-              href="/privacy"
-              className="text-foreground/80 hover:text-foreground inline-block underline-offset-2 hover:underline"
-            >
-              Why it&apos;s safe →
-            </Link>
+            <div>
+              <Link
+                href="/privacy"
+                className="text-foreground/80 hover:text-foreground underline-offset-2 hover:underline"
+              >
+                Why it&apos;s safe →
+              </Link>
+            </div>
           </div>
 
           {error && (
