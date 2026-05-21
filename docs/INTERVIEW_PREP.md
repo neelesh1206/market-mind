@@ -719,6 +719,55 @@ Resolved MarketMind's own verdicts against `open → close` initially, same as u
 
 **Lesson logged:** scoring windows must match the prediction-decision time. Different actors (user vs model) made decisions at different times — they need different windows.
 
+### 6. PostgREST inner joins silently filter to empty when joined table has no SELECT policy
+
+Shipped the promo-code redemption feature. Tables: `promo_codes` (admin catalog — deny-all RLS, writes via service-role, reads via SECURITY DEFINER RPC) and `promo_code_redemptions` (per-user ledger — own-read RLS). Redemption RPC worked perfectly: credits landed, ledger row inserted, daily-cap counter incremented correctly.
+
+But the "Recent redemptions" list in the credits dialog rendered empty after the sheet was reopened. The optimistic in-memory entry showed for a moment (the local `setData` after a successful redeem) and then vanished on the next lazy-fetch.
+
+**Root cause.** The history query lived in `fetchRecentRedemptions`:
+
+```typescript
+.from("promo_code_redemptions")
+.select("credits, redeemed_at, promo_codes!inner(code)")
+.eq("user_id", userId)
+```
+
+The `promo_codes!inner(code)` is PostgREST embed syntax for an inner join. PostgREST evaluates RLS on **both sides** of an embedded join — on `promo_code_redemptions` (own-read policy, OK) and on `promo_codes` (no SELECT policy, deny-all). With no policy granting the authenticated role read access, every joined `promo_codes` row got filtered out. Because `!inner` requires the joined row to exist, every parent row was filtered too. Result: empty list, no error.
+
+This isn't a Postgres-specific weirdness — it's how RLS interacts with row visibility everywhere. The mental model is: an RLS policy doesn't "deny" the query; it **filters** what's visible. With no policy, nothing is visible. A normal `SELECT … FROM promo_code_redemptions JOIN promo_codes …` query through a regular client would behave identically: zero rows, no error, no log line.
+
+The daily-cap counter (which sums `credits` from `promo_code_redemptions` only — no join) worked correctly because that query never touches `promo_codes`. So the bug surface was narrow to anything joining to the catalog table.
+
+**Fix.** Migration `20260521000002` added a narrow SELECT policy on `promo_codes`:
+
+```sql
+create policy "promo_codes_redeemed_read" on promo_codes
+  for select
+  using (
+    exists (
+      select 1 from promo_code_redemptions
+      where code_id = promo_codes.id and user_id = auth.uid()
+    )
+  );
+```
+
+Users can now read code text **only for codes they've redeemed**. Catalog enumeration is still blocked — listing all active codes still requires service-role.
+
+**Why this is a *good* interview story.** It touches several non-obvious things at once:
+
+1. **PostgreSQL Row-Level Security is a *visibility* primitive, not an *access denial* primitive.** No error, no exception, just rows that don't exist from the caller's perspective. The same SQL runs successfully — it just returns different row counts depending on who's asking.
+
+2. **PostgREST embed joins respect RLS on both tables.** This is sometimes counterintuitive — you might think "I have a read policy on the parent, that's enough." It isn't.
+
+3. **Test against real RLS, not service-role.** Service-role bypasses RLS entirely, so a service-role test would have shown the join working perfectly. The bug only manifests for the authenticated role the actual user is running with. Tests that use Supabase fixtures with service-role can paper over this entire class of bug.
+
+4. **Lint, typecheck, build, and unit tests all passed.** The failure mode is a runtime interaction between schema + policies + query shape. The only thing that catches it is end-to-end manual or e2e testing — which is exactly how I found it (user smoke test of the redeem flow).
+
+5. **The cleanest fix is a narrow policy, not a denormalization.** I considered storing `code text` directly on `promo_code_redemptions` so the join goes away. That works but couples the schema to a UI concern (the dialog needs the code string) and creates a denormalization that has to be kept in sync if codes are ever renamed (they aren't, but the principle bites elsewhere). The narrow policy is the simpler fix and aligns the data model with the access policy.
+
+**Lesson logged:** for any Supabase read path, enumerate the tables it touches (direct + every PostgREST embed), and confirm the calling role has a SELECT policy that resolves to non-empty rows on each. When in doubt, test the read path against a logged-in browser session, not service-role.
+
 ---
 
 ## What's next
@@ -792,6 +841,14 @@ Filed but not yet shipped:
 
 → [Deployment](#deployment). Push-to-main auto-deploys to Vercel + runs CI. Schema changes are explicit (manual workflow_dispatch with confirmation). Worker deploys are manual. Production deploys have never required a rollback — when one was wrong I shipped a forward-fix within an hour.
 
+### "Tell me about a tricky bug you debugged."
+
+→ The promo-code redemption RLS-join bug. Short story: after a successful code redemption, the credits were applied correctly and the daily-cap counter updated correctly, but the "Recent redemptions" history list rendered empty after the user reopened the dialog. Root cause: PostgreSQL Row-Level Security is a row-visibility filter, not an access-denial mechanism, and PostgREST embed inner-joins respect RLS on **both** tables — so my history query that joined the deny-all `promo_codes` catalog table came back with zero rows even though the redemption rows existed. Lint, typecheck, build, and unit tests all passed because the failure mode is a runtime interaction between schema + policies + query shape. Found via manual smoke test. Fixed with a narrow SELECT policy: users can read `promo_codes` rows IFF they have a redemption against them. The deep section: see ["6. PostgREST inner joins…"](#6-postgrest-inner-joins-silently-filter-to-empty-when-joined-table-has-no-select-policy).
+
+### "How does Postgres RLS actually work?"
+
+→ RLS rewrites the query plan: every `SELECT` against a table with RLS effectively gets an `AND <policy_expression>` appended for the calling role. Policies are *filters*, not *deny lists* — with no policy, the implicit filter is `false`, so the visible row count for that role is zero (no error, just empty). Service-role bypasses RLS entirely (that's why we use it for admin/pipeline writes). The non-obvious piece: when a query joins two RLS-protected tables (via SQL join or PostgREST embed), the policies on **each table** filter independently before the join. So if you have a strict policy on one side and a loose policy on the other, the strict side gates the result. This is why a working own-read policy on `promo_code_redemptions` wasn't enough — the joined `promo_codes` table also needed a (narrow) policy for the user's redemption-history query to return rows.
+
 ---
 
-*Last updated: 2026-05-20 (Day 3, in progress).*
+*Last updated: 2026-05-21 (Day 4, in progress).*
