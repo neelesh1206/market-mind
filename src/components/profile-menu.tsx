@@ -12,12 +12,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 
 type Props = {
   email: string;
   displayName: string;
   watchlistCount: number;
+  /** Google profile picture URL, extracted from JWT claims at render time.
+   *  Optional — falls back to a single-letter initial chip when missing. */
+  avatarUrl?: string | null;
 };
 
 /**
@@ -25,12 +29,10 @@ type Props = {
  * Replaces the standalone Manage-stocks link + Sign-out button — both are
  * now accessible at every breakpoint with one tap on the avatar.
  */
-export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
+export function ProfileMenu({ email, displayName, watchlistCount, avatarUrl }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-
-  const initial = (displayName?.[0] ?? "?").toUpperCase();
 
   function signOut() {
     startTransition(async () => {
@@ -44,10 +46,10 @@ export function ProfileMenu({ email, displayName, watchlistCount }: Props) {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        className="bg-secondary text-secondary-foreground hover:bg-secondary/80 focus-visible:ring-ring focus-visible:ring-offset-background flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="focus-visible:ring-ring focus-visible:ring-offset-background rounded-full transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         aria-label={`Account menu — ${displayName}`}
       >
-        {initial}
+        <UserAvatar src={avatarUrl ?? null} displayName={displayName} />
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-56">

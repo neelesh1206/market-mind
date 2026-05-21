@@ -24,6 +24,7 @@ import {
 import { fetchBetsForTradingDay } from "@/lib/bets";
 import { fetchDailyBars } from "@/lib/price-history";
 import { getLivePrice } from "@/lib/live-prices";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { BetCta } from "@/components/bet-cta";
 import { StockSparkline } from "@/components/stock-sparkline";
@@ -76,6 +77,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
   const { data: claims } = await supabase.auth.getClaims();
   const userId = (claims?.claims?.sub as string | undefined) ?? null;
   const email = (claims?.claims?.email as string | undefined) ?? null;
+  const avatarUrl = avatarUrlFromClaims(claims?.claims as Record<string, unknown> | null);
 
   const schedule = getMarketSchedule();
 
@@ -161,6 +163,7 @@ export default async function StockDetailPage({ params }: { params: Params }) {
                 email={email ?? ""}
                 displayName={name ?? "You"}
                 watchlistCount={watchlist.length}
+                avatarUrl={avatarUrl}
               />
             )}
           </div>

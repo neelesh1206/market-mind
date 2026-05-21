@@ -5,6 +5,7 @@ import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchConvictionList, fetchHomeFeed, fetchTrackRecord, rankFeed } from "@/lib/feed";
 import { fetchBetsForTradingDay, fetchUnrevealedResolved } from "@/lib/bets";
 import { getDailyBonusStatus } from "@/lib/bonus";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { getLivePrices } from "@/lib/live-prices";
 import { etCalendarDate, getMarketSchedule } from "@/lib/market-schedule";
 import { ConvictionList } from "@/components/conviction-list";
@@ -28,6 +29,10 @@ export default async function Home() {
 
   const userId = data.claims.sub as string;
   const email = (data.claims.email ?? userId) as string;
+  // Google profile picture, extracted from the JWT's user_metadata.
+  // Threaded into ProfileMenu for the header avatar; null falls back
+  // to the single-letter initial chip.
+  const avatarUrl = avatarUrlFromClaims(data.claims as Record<string, unknown>);
 
   // New users with no watchlist → send to onboarding
   const watchlist = await fetchUserWatchlist(supabase, userId);
@@ -110,7 +115,12 @@ export default async function Home() {
           <div className="flex items-center gap-2 sm:gap-3">
             <CreditsChip credits={credits} />
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            <ProfileMenu
+              email={email}
+              displayName={name}
+              watchlistCount={watchlist.length}
+              avatarUrl={avatarUrl}
+            />
           </div>
         </div>
       </header>

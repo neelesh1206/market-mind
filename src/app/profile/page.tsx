@@ -4,9 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchUserBadges, BADGE_CATALOG } from "@/lib/badges";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { CreditsChip } from "@/components/credits-chip";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { UserAvatar } from "@/components/user-avatar";
 import { BadgeGrid } from "@/components/badge-grid";
 
 export const metadata = { title: "Profile" };
@@ -26,6 +28,7 @@ export default async function ProfilePage() {
   }
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
+  const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
 
   const [profileRes, watchlist, badges] = await Promise.all([
     supabase
@@ -67,18 +70,32 @@ export default async function ProfilePage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <CreditsChip credits={credits} />
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            <ProfileMenu
+              email={email}
+              displayName={name}
+              watchlistCount={watchlist.length}
+              avatarUrl={avatarUrl}
+            />
           </div>
         </div>
       </header>
 
       <main id="main" className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-10">
-        {/* Identity */}
-        <section className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">{name}</h1>
-          {memberSince && (
-            <p className="text-muted-foreground text-sm">Member since {memberSince}</p>
-          )}
+        {/* Identity — Google profile picture + name + member-since.
+            Large avatar (16px) anchors the page; falls back to a
+            single-letter initial chip when avatarUrl is null. */}
+        <section className="flex items-center gap-4">
+          <UserAvatar
+            src={avatarUrl}
+            displayName={name}
+            className="h-16 w-16 text-2xl"
+          />
+          <div className="space-y-1">
+            <h1 className="text-3xl font-semibold tracking-tight">{name}</h1>
+            {memberSince && (
+              <p className="text-muted-foreground text-sm">Member since {memberSince}</p>
+            )}
+          </div>
         </section>
 
         {/* Stats */}

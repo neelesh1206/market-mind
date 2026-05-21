@@ -94,7 +94,7 @@ export function LoginForm() {
           <div className="text-muted-foreground space-y-1 text-center text-[11px] leading-relaxed">
             <p className="inline-flex items-center justify-center gap-1.5">
               <Lock className="h-3 w-3 shrink-0" aria-hidden />
-              <span>Secured by Google · sign-in only</span>
+              <span>Secured by Google</span>
             </p>
             <div>
               <Link

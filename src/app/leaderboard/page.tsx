@@ -4,6 +4,7 @@ import { ArrowLeft, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { fetchLatestLeaderboard } from "@/lib/leaderboard";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { CreditsChip } from "@/components/credits-chip";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -19,6 +20,7 @@ export default async function LeaderboardPage() {
   }
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
+  const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
 
   const [profileRes, watchlist, snapshot] = await Promise.all([
     supabase
@@ -50,7 +52,12 @@ export default async function LeaderboardPage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <CreditsChip credits={credits} />
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            <ProfileMenu
+              email={email}
+              displayName={name}
+              watchlistCount={watchlist.length}
+              avatarUrl={avatarUrl}
+            />
           </div>
         </div>
       </header>

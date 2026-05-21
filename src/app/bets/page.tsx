@@ -9,6 +9,7 @@ import {
 } from "@/lib/bets";
 import { fetchUserWatchlist } from "@/lib/watchlist";
 import { etCalendarDate } from "@/lib/market-schedule";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BetHistoryList } from "@/components/bet-history-list";
@@ -34,6 +35,7 @@ export default async function BetsPage() {
   }
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
+  const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
 
   const [history, ledger, watchlist, profileRes] = await Promise.all([
     fetchUserBetHistory(supabase, userId, { limit: 200 }),
@@ -66,7 +68,12 @@ export default async function BetsPage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <CreditsChip credits={credits} />
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            <ProfileMenu
+              email={email}
+              displayName={name}
+              watchlistCount={watchlist.length}
+              avatarUrl={avatarUrl}
+            />
           </div>
         </div>
       </header>

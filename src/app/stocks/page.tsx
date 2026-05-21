@@ -8,6 +8,7 @@ import {
   fetchUserStockRequests,
   fetchUserWeeklyRequestCount,
 } from "@/lib/stock-requests";
+import { avatarUrlFromClaims } from "@/lib/avatar";
 import { CreditsChip } from "@/components/credits-chip";
 import { ProfileMenu } from "@/components/profile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -34,6 +35,7 @@ export default async function StocksPage() {
   }
   const userId = claims.claims.sub as string;
   const email = (claims.claims.email ?? userId) as string;
+  const avatarUrl = avatarUrlFromClaims(claims.claims as Record<string, unknown>);
 
   const [
     allStocks,
@@ -74,7 +76,12 @@ export default async function StocksPage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <CreditsChip credits={credits} />
             <ThemeToggle />
-            <ProfileMenu email={email} displayName={name} watchlistCount={watchlist.length} />
+            <ProfileMenu
+              email={email}
+              displayName={name}
+              watchlistCount={watchlist.length}
+              avatarUrl={avatarUrl}
+            />
           </div>
         </div>
       </header>
