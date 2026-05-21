@@ -313,7 +313,7 @@ export default async function AboutPage() {
         </section>
 
         {/* The four signal buckets */}
-        <section className="space-y-6">
+        <section id="signals" className="space-y-6 scroll-mt-24">
           <header className="space-y-1">
             <h2 className="text-2xl font-semibold">The four signal buckets</h2>
             <p className="text-muted-foreground text-sm leading-relaxed">
