@@ -29,7 +29,7 @@ export default function PrivacyPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Privacy</h1>
         <p className="text-muted-foreground text-sm">
-          Last updated: 2026-05-20 (avatar display) · Effective immediately.
+          Last updated: 2026-05-22 (purpose + retention sections) · Effective immediately.
         </p>
       </header>
 
@@ -81,6 +81,43 @@ export default function PrivacyPage() {
             <code className="rounded bg-muted px-1.5 py-0.5 text-[12px]">email</code>, and{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-[12px]">profile</code> — non-sensitive scopes for
             sign-in only.
+          </p>
+        </section>
+
+        {/* ─────────────────────────────────────────────────────────────── */}
+        {/* Explicit "Purpose of use" section — redundant with the rest of  */}
+        {/* the page, but Google's OAuth verifier greps for this vocabulary */}
+        {/* literally. Added 2026-05-22 in response to a verification       */}
+        {/* clarification request (see ADR / commit history).               */}
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Purpose of use</h2>
+          <p className="text-muted-foreground">
+            The Google user data listed above is used <span className="text-foreground">solely to identify
+            your MarketMind account</span> across visits and to personalize the in-app header (your
+            display name and avatar). Specifically:
+          </p>
+          <ul className="text-muted-foreground ml-6 list-disc space-y-1.5">
+            <li>
+              <span className="text-foreground">Email</span> — used as your unique account identifier and to
+              contact you if you request a data deletion. Not used for marketing, newsletters, or any other
+              outbound communication.
+            </li>
+            <li>
+              <span className="text-foreground">Display name</span> — shown in the header greeting (&ldquo;Welcome
+              back, &lt;name&gt;&rdquo;) and on the public leaderboard if you opt in.
+            </li>
+            <li>
+              <span className="text-foreground">Profile picture URL</span> — rendered as your avatar in the
+              header dropdown and on your profile page. Read on each render, never stored.
+            </li>
+            <li>
+              <span className="text-foreground">Google user ID</span> — internal foreign key tying your sign-in
+              token to your account row. Never displayed to other users.
+            </li>
+          </ul>
+          <p className="text-muted-foreground">
+            Google user data is <span className="text-foreground">not</span> used for advertising, sold to third
+            parties, shared with data brokers, or used to train AI/ML models.
           </p>
         </section>
 
@@ -185,6 +222,28 @@ export default function PrivacyPage() {
           <p className="text-muted-foreground">
             That stops the OAuth connection effective immediately. Google will no longer share new sign-in tokens
             with us.
+          </p>
+        </section>
+
+        {/* ─────────────────────────────────────────────────────────────── */}
+        {/* Explicit "Retention" section — same reason as "Purpose of use"  */}
+        {/* above. Verifier wants the literal word "retention" on the page. */}
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Data retention</h2>
+          <p className="text-muted-foreground">
+            We retain your Google sign-in identity (email, display name, Google user ID) and your
+            MarketMind game state (watchlist, predictions, credit balance, badges, feedback) for as
+            long as your account exists. We do not have a fixed expiry — the data is what makes the
+            app work for you on return visits.
+          </p>
+          <p className="text-muted-foreground">
+            When you request deletion (see next section), every row tied to your account is removed
+            from Supabase within 24 hours. Vercel and Cloudflare HTTP request logs roll off on their
+            standard vendor schedules (~30 days). Upstash cache entries auto-expire within minutes.
+          </p>
+          <p className="text-muted-foreground">
+            Your Google profile picture URL is never stored, so no retention applies — it disappears
+            from our side the moment you sign out or revoke OAuth access.
           </p>
         </section>
 
