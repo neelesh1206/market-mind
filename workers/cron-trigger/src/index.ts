@@ -24,6 +24,22 @@
  * logs the error (visible in `wrangler tail` or the dashboard) but does NOT
  * retry. The pipeline's existing stuck-bet UI (ADR 0009 follow-up #124)
  * surfaces missed runs to users so the silent-failure window is bounded.
+ *
+ * Monitoring (dead-man's-switch): Cloudflare logging a thrown error is
+ * worthless if nobody reads CF logs. We learned this the hard way — the
+ * Worker dispatched with an absent/invalid PAT for a week, GitHub returned
+ * 401 every fire, the Worker threw every fire, and it was completely silent
+ * because nobody was tailing CF logs. So we ping an external monitor
+ * (healthchecks.io or any compatible endpoint) on every fire:
+ *   - SUCCESS  → ping the base URL. The monitor expects a ping on the cron
+ *                cadence; if one is missed (Worker never ran — CF scheduler
+ *                issue), the monitor alerts after its grace period.
+ *   - FAILURE  → ping `<url>/fail`. Fires an immediate alert — this is the
+ *                case that bit us (dispatch reaches GitHub but is rejected).
+ * Both are best-effort and OPTIONAL: if HEALTHCHECK_URL is unset the Worker
+ * behaves exactly as before. A monitoring outage must never block or mask a
+ * real dispatch, so ping failures are swallowed and the original dispatch
+ * error is always rethrown.
  */
 
 interface Env {
@@ -31,6 +47,39 @@ interface Env {
   GITHUB_PAT: string;
   /** `owner/repo` slug. Set via `wrangler.toml` [vars]. */
   REPO: string;
+  /**
+   * Optional dead-man's-switch ping URL (healthchecks.io check URL or any
+   * endpoint following the `<url>` = OK, `<url>/fail` = failure convention).
+   * Set via `wrangler secret put HEALTHCHECK_URL`. Absent = monitoring off.
+   */
+  HEALTHCHECK_URL?: string;
+}
+
+/**
+ * Best-effort ping to the external monitor. Never throws — a monitoring
+ * outage must not affect (or mask) the actual dispatch outcome. Returns
+ * nothing; callers don't await the result on the success path (we hand it
+ * to ctx.waitUntil so it doesn't add latency to the scheduled handler).
+ */
+async function pingMonitor(
+  env: Env,
+  ok: boolean,
+  detail: string,
+): Promise<void> {
+  if (!env.HEALTHCHECK_URL) return; // monitoring not configured — no-op
+  const url = ok ? env.HEALTHCHECK_URL : `${env.HEALTHCHECK_URL}/fail`;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "User-Agent": "marketmind-cron-trigger" },
+      // Body is surfaced in the healthchecks.io event log — handy for
+      // seeing *which* workflow and *why* without opening CF logs.
+      body: detail.slice(0, 1000),
+    });
+  } catch {
+    // Swallow: monitor unreachable is strictly less important than the
+    // dispatch we already attempted. CF still logs the dispatch outcome.
+  }
 }
 
 /**
@@ -91,21 +140,25 @@ export default {
     const elapsedMs = Date.now() - startedAt;
 
     if (!resp.ok) {
-      // 401 = bad PAT; 404 = workflow not found or PAT lacks actions:write
-      // on this repo; 422 = ref doesn't exist. The body usually tells you
-      // which. Throwing surfaces it in Cloudflare logs + (if wired) any
-      // alerting on Worker errors.
+      // 401 = bad/absent PAT; 404 = workflow not found or PAT lacks
+      // actions:write on this repo; 422 = ref doesn't exist. The body
+      // usually tells you which. We fire an IMMEDIATE failure ping (this is
+      // the exact case that ran silent for a week) and then throw so CF also
+      // records the exception. Await the ping so it lands before the
+      // isolate is torn down by the throw.
       const body = await resp.text();
-      throw new Error(
-        `[cron-trigger] dispatch failed for ${workflow}: HTTP ${resp.status} after ${elapsedMs}ms — ${body}`,
-      );
+      const msg = `[cron-trigger] dispatch failed for ${workflow} (cron=${event.cron}): HTTP ${resp.status} after ${elapsedMs}ms — ${body}`;
+      await pingMonitor(env, false, msg);
+      throw new Error(msg);
     }
 
     // 204 No Content is the success response per GitHub's docs. Log so
     // `wrangler tail` shows a positive heartbeat — useful when debugging
     // "did anything fire" questions without round-tripping to the GH UI.
-    console.log(
-      `[cron-trigger] dispatched ${workflow} (cron=${event.cron}) in ${elapsedMs}ms — HTTP ${resp.status}`,
-    );
+    const okMsg = `[cron-trigger] dispatched ${workflow} (cron=${event.cron}) in ${elapsedMs}ms — HTTP ${resp.status}`;
+    console.log(okMsg);
+    // Success heartbeat to the dead-man's-switch. waitUntil so it doesn't
+    // add latency to the handler; if the monitor is down we don't care.
+    ctx.waitUntil(pingMonitor(env, true, okMsg));
   },
 };
