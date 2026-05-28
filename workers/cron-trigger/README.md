@@ -177,7 +177,24 @@ The Worker now pings an external monitor on every fire (best-effort, optional):
 If `HEALTHCHECK_URL` is unset, monitoring is simply off and the Worker behaves
 exactly as before — a monitoring outage never blocks or masks a real dispatch.
 
-### Setup
+### Current deployment (live since 2026-05-28)
+
+- **Provider**: healthchecks.io, check name **`marketmind-cron`**, in the
+  project owner's healthchecks account.
+- **Ping URL**: stored only as the Worker secret `HEALTHCHECK_URL`. It's a
+  capability URL (`https://hc-ping.com/<uuid>`) — anyone holding it can spoof
+  a heartbeat or trip `/fail`, so **it is never committed to this repo**.
+  Retrieve it from the healthchecks check page if you need to re-set it.
+- **Schedule**: Period `1 day`, Grace `16 hours`. The grace is deliberately
+  loose: the Worker pings on every successful dispatch, and the crons leave a
+  legitimate ~36h quiet window over the weekend (Sat 00:00 UTC fetch → Sun
+  12:00 UTC rotation — no Sat resolve, no Sun fetch). Period + grace must
+  exceed ~36h or the check false-alarms every weekend. The immediate `/fail`
+  ping is the real-time net, so a loose dead-man's-switch loses nothing.
+- **Alert channel**: email to the project owner. Add Slack/Discord in the
+  healthchecks check's Integrations tab if desired.
+
+### Setup (first-time)
 
 1. Create a free check at [healthchecks.io](https://healthchecks.io) (or use
    any endpoint following the `<url>` = OK / `<url>/fail` = fail convention —

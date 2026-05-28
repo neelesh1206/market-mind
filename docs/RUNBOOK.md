@@ -212,21 +212,62 @@ Pipeline triggers come from the Cloudflare Worker at `workers/cron-trigger/`,
 NOT from GitHub `schedule:` blocks (we removed those in ADR 0016 — GH crons
 were unreliable). If a run is completely missing from the GH Actions tab:
 
-1. **Check the Worker fired**: `cd workers/cron-trigger && npx wrangler tail`
-   and wait for the next scheduled time, OR check Cloudflare → Workers →
-   marketmind-cron-trigger → Logs for the most recent invocation.
+> **First, how you should have already known:** the Worker reports to a
+> [healthchecks.io](https://healthchecks.io) dead-man's-switch (check name
+> `marketmind-cron`, in the project owner's healthchecks account). It pings
+> on every successful dispatch and pings `…/fail` on every failed one, with
+> email alerts to the owner. If the pipeline silently stopped, that alert
+> is the intended trip-wire — check your email before spelunking. The ping
+> URL is stored only as the Worker's `HEALTHCHECK_URL` secret (it's a
+> capability URL — never commit it).
+
+1. **Check the Worker fired**: from `workers/cron-trigger/`, run
+   `PATH="$HOME/.nvm/versions/node/v24.15.0/bin:$PATH" npx wrangler tail` and
+   wait for the next scheduled time, OR check Cloudflare → Workers →
+   marketmind-cron-trigger → Logs for the most recent invocation. (Wrangler
+   needs Node ≥ 18; the repo's default shell Node may be too old — hence the
+   explicit nvm PATH.)
 2. **If Worker fired but no GH run**: the dispatch API call failed. The
-   Worker logs the response code — common causes are an expired
-   `GITHUB_PAT` (401), the PAT losing `actions:write` scope (403), or the
-   workflow file being renamed (404). Rotate the PAT via
-   `npx wrangler secret put GITHUB_PAT` from `workers/cron-trigger/`.
-3. **If Worker didn't fire**: check `wrangler.toml [triggers] crons` is
-   deployed (run `npx wrangler deployments list` to see the active
-   version). Re-deploy with `npx wrangler deploy` if needed.
-4. **Always-on workaround**: manually dispatch the workflow:
+   Worker logs the response code — common causes are a bad/absent
+   `GITHUB_PAT` (401 `Bad credentials`), the PAT losing `actions:write`
+   scope (403), or the workflow file being renamed (404).
+   - **Verify the secret is even present** (a failed `secret put` is silent):
+     `npx wrangler secret list` — you should see `GITHUB_PAT`. If it prints
+     `[]`, the secret is missing and the Worker has been sending
+     `Bearer undefined`. This is the **2026-05 incident** (see CHANGELOG):
+     the secret was absent for ~7 days, every fire 401'd, and it ran silent
+     because the dead-man's-switch wasn't wired yet.
+   - Re-set it: `npx wrangler secret put GITHUB_PAT`, then **re-run
+     `secret list` to confirm it took.**
+3. **If Worker didn't fire at all**: check `wrangler.toml [triggers] crons`
+   is deployed (`npx wrangler deployments list` shows the active version).
+   Re-deploy with `npx wrangler deploy` if needed.
+4. **Verify end-to-end without waiting for a scheduled time**: run the
+   deployed Worker against its real secrets and fire one cron:
+   ```bash
+   npx wrangler dev --remote --test-scheduled --port 8799 &
+   curl "http://localhost:8799/__scheduled?cron=15+21+*+*+1-5"
+   ```
+   `dispatched … HTTP 204` = healthy; `HTTP 401 … Bad credentials` = bad PAT.
+   (A successful probe queues a real run — `fetch`/`resolve` are
+   concurrency-guarded so this is safe.)
+5. **Always-on workaround**: manually dispatch the workflow:
    `gh workflow run fetch-insights.yml`. This routes around the
    Worker entirely and uses GH's `workflow_dispatch:` trigger (which
    is rock-solid even when scheduled triggers are flaky).
+
+### Cron monitoring false alarm / "check is down" email
+
+The `marketmind-cron` healthcheck covers *all four* crons with one check, and
+the Worker pings on every successful dispatch. The crons aren't evenly
+spaced — the longest legitimate quiet window is **Sat 00:00 UTC → Sun 12:00
+UTC (~36h)** (Saturday has only the fetch run; Sunday's first run is the
+12:00 rotation). The check's **Grace Time must exceed ~36h of period+grace
+slack** or it will false-alarm every weekend. Current setting: Period 1 day,
+Grace 16h (= 40h tolerance). If you tighten the schedule, keep period+grace
+≥ ~38h. The real-time safety net is the `…/fail` ping, which is immediate and
+schedule-independent — so a generous grace costs nothing on the failure mode
+that actually matters.
 
 ### Resolution job missed market close
 
