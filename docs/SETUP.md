@@ -248,6 +248,23 @@ For [`apply-migrations.yml`](.github/workflows/apply-migrations.yml) to work, ad
 | `SUPABASE_DB_PASSWORD` | The DB password you saved when creating `marketmind-prod` (if lost, reset under Project Settings → Database) |
 | `SUPABASE_PROJECT_REF` | The project ref from your Supabase URL (`cqbdjiphrrdwmbrqoeeh`) |
 
+### Pipeline notification secret (optional but recommended)
+
+The four pipeline workflows post a completion message to Slack on success **and** failure via the [`.github/actions/slack-notify`](.github/actions/slack-notify/action.yml) composite action. It no-ops cleanly if the secret is absent, so this is optional — but it's how you get a daily "it ran" confirmation on your phone plus an immediate alert when something breaks.
+
+| Secret | Where to get it |
+|--------|-----------------|
+| `SLACK_WEBHOOK_URL` | [api.slack.com/apps](https://api.slack.com/apps) → Create App (From scratch) → **Incoming Webhooks** → Activate → **Add New Webhook to Workspace** → pick the channel → copy the `https://hooks.slack.com/services/…` URL. Add via `gh secret set SLACK_WEBHOOK_URL`. |
+
+### Cloudflare Worker secrets (cron + monitoring)
+
+These live on the Cloudflare Worker ([`workers/cron-trigger/`](../workers/cron-trigger/)), **not** in GitHub Actions. Set them with `npx wrangler secret put <NAME>` from that directory, then confirm with `npx wrangler secret list` (a failed `put` is silent — always verify). See the [Worker README](../workers/cron-trigger/README.md) for the full walkthrough.
+
+| Secret | Purpose |
+|--------|---------|
+| `GITHUB_PAT` | Fine-grained PAT with **Actions: Read and write** on this repo. The Worker uses it to dispatch the pipeline workflows. If absent/expired, every cron fails with `401 Bad credentials`. |
+| `HEALTHCHECK_URL` | healthchecks.io ping URL (`https://hc-ping.com/<uuid>`) for the dead-man's-switch. Optional — monitoring is off if unset. **Capability URL — never commit it.** Schedule the check Period 1 day / Grace ~16h to clear the legitimate ~36h weekend quiet window. |
+
 ---
 
 ## Verifying it works

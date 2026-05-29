@@ -84,7 +84,7 @@ Both come from [ADR 0012](docs/adr/0012-local-finbert-and-hf-breaker.md) (shippe
 | Stock data — historical | Massive (formerly Polygon.io) Stocks Starter — daily aggregates, news |
 | Stock data — live quotes | Finnhub free tier — real-time US equity prices (60/min) |
 | NLP | FinBERT (local CPU, pinned SHA) + Llama-3.1-8B-Instruct via HuggingFace Pro Inference API (default fallback: Mistral-Nemo-Instruct-2407, ungated) |
-| Observability | Sentry + PostHog |
+| Observability | Sentry + PostHog · pipeline monitoring via Slack alerts + healthchecks.io dead-man's-switch |
 | Hosting | Vercel (Hobby) |
 
 **Monthly cost: ~$38** ([cost breakdown](docs/ARCHITECTURE.md#cost))
@@ -118,6 +118,16 @@ Implementation in [`src/lib/live-prices.ts`](src/lib/live-prices.ts).
 - **One Upstash database**, region matched to Vercel's primary deploy region (~5ms median read)
 - **Free tier covers it**: 10k commands/day, 256 MB. Our actual draw: ~3k commands/day at current traffic, ~2 MB used
 - **No persistence needed**: rate-limit counters expire naturally, price cache is short-TTL — losing the entire DB just means one slow page load while we re-fetch
+
+## Pipeline scheduling & monitoring
+
+The nightly pipeline is a daily ritual — "did the insights run last night?" is the difference between a working product and a broken one. Three layers keep it honest:
+
+- **Scheduling — Cloudflare Worker cron, not GitHub `schedule:`.** A ~110-line Worker ([`workers/cron-trigger/`](workers/cron-trigger/)) fires the four pipeline workflows via the GitHub `workflow_dispatch` API. GitHub's own scheduled triggers drifted multi-hour on the free tier; Cloudflare cron is reliable within ~1 min. The Worker is the single source of truth for timing — the workflow YAMLs keep `workflow_dispatch:` but have no `schedule:` blocks. See [ADR 0016](docs/adr/0016-external-cron-via-cloudflare-worker.md).
+- **"Did it run at all?" — healthchecks.io dead-man's-switch.** The Worker pings a healthchecks.io check on every successful dispatch and `…/fail` on every failure. A missed daily ping (Worker dead, scheduler outage) trips an email alert after a grace window; a dispatch rejection (e.g. a bad GitHub credential) trips an *immediate* alert. This exists because the credential once silently lapsed and the pipeline ran dark for ~7 days before anyone noticed — see the [CHANGELOG incident writeup](CHANGELOG.md).
+- **"How did it go?" — Slack completion notifications.** Every pipeline workflow posts a Block Kit message to Slack on completion (success *and* failure) via a reusable composite action ([`.github/actions/slack-notify`](.github/actions/slack-notify/action.yml)): status, a one-line summary, and a "View run" link. So the morning "Fetch Insights ✅" and evening "Resolve Predictions ✅" land on your phone, and a red ❌ shows up the moment anything breaks. Fails soft — an unset webhook no-ops; a Slack hiccup never turns a green run red.
+
+healthchecks answers *"did the workflow start?"*; Slack answers *"how did it finish?"* — together they close the silent-failure gap from both ends.
 
 ## Quick start
 
