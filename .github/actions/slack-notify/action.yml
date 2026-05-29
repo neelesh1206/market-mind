@@ -10,7 +10,11 @@ inputs:
     required: false
     default: ""
   status:
-    description: "Job status — pass `${{ job.status }}` (success/failure/cancelled)."
+    # NB: do not put a live ${{ }} expression in this description — GitHub
+    # evaluates expressions even inside description text, and the `job`
+    # context isn't available in a composite-action manifest (it would fail
+    # with "Unrecognized named-value: 'job'"). Callers pass job.status here.
+    description: "Job status from the caller's job.status (success/failure/cancelled)."
     required: true
   title:
     description: "Human job name, e.g. 'Fetch Insights'."
