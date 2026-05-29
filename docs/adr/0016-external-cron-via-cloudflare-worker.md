@@ -247,3 +247,85 @@ must be followed by `cd workers/cron-trigger && npx wrangler deploy`.
 A future task (#122 pipeline-health) will surface "last successful
 fire was N hours ago" so this gap becomes visible in-app instead of
 needing manual discovery.
+
+## Amendment 2026-05-28 — silent-failure incident + monitoring stack
+
+The risk this very ADR flagged — "best-effort scheduling means a missed
+run is a broken product" — bit us in a way we hadn't guarded against. The
+scheduling was fine; the **credential** wasn't, and nothing was watching.
+
+### What happened
+
+The pipeline produced no runs for ~7 days (May 21 → May 28). The Worker's
+`GITHUB_PAT` secret was **absent** on the deployed Worker — `wrangler secret
+list` returned `[]`. (Root cause undetermined: a `wrangler secret put` that
+never took, or went to a different worker/account context during initial
+setup.) The Worker fired on schedule every time, POSTed to GitHub's
+`workflow_dispatch` API with `Authorization: Bearer undefined`, received
+`401 Bad credentials`, threw, and created no run.
+
+It was **completely silent** because nobody tails Cloudflare logs daily. The
+"successful" `workflow_dispatch` runs visible in the GH Actions history
+during this window were all *manual* `gh workflow run` triggers during
+unrelated debugging — masking the gap. In effect, **the Worker had never
+once successfully dispatched since cut-over**; the original ADR's claim of a
+working cron was never actually validated end-to-end.
+
+A wrong first hypothesis cost time: "the PAT expired." It hadn't — the
+fine-grained token was valid through 2027. The bug was a missing *secret*,
+not a dead *token*. Lesson: reproduce against the real binding before
+theorizing about credentials.
+
+### The reproduction technique worth keeping
+
+`workers_dev = false` means there's no public URL to curl, so the trustworthy
+way to test the deployed Worker against its **real** secrets is:
+
+```bash
+npx wrangler dev --remote --test-scheduled --port 8799 &
+curl "http://localhost:8799/__scheduled?cron=15+21+*+*+1-5"
+```
+
+`--remote` runs the deployed code on Cloudflare's edge with the real bindings;
+`--test-scheduled` exposes `/__scheduled`. The Worker log shows `… HTTP 204`
+(healthy) or `… HTTP 401 Bad credentials` (bad/absent PAT). This is now the
+canonical "is the cron actually working?" check (also in the RUNBOOK).
+
+### Decision: two complementary monitors, because logging ≠ alerting
+
+The original ADR said a failed dispatch "throws — Cloudflare logs the error."
+That is worthless when no human reads CF logs. We added active alerting from
+**both ends of the failure space**:
+
+1. **healthchecks.io dead-man's-switch** (Worker-side). The Worker pings a
+   check URL (`HEALTHCHECK_URL` secret) on every successful dispatch and
+   `…/fail` on every failure. A missed daily ping (Worker dead / CF scheduler
+   outage — *"did it even start?"*) trips an alert after a grace window; a
+   dispatch rejection (*the 401 class*) trips an **immediate** alert. Both
+   best-effort and optional: an unset URL no-ops, ping errors are swallowed,
+   and the original dispatch error is always rethrown so CF still records it.
+   The check (`marketmind-cron`) is Period 1 day / Grace 16h — deliberately
+   loose to clear the legitimate ~36h Sat→Sun quiet window (Sat has only the
+   fetch run; Sunday's first run is the 12:00 rotation). The `/fail` ping is
+   the real-time net, so a loose dead-man's-switch loses nothing.
+
+2. **Slack per-job completion notifications** (Actions-side). Each of the four
+   pipeline workflows posts a Block Kit message on completion — success **and**
+   failure — via the reusable `.github/actions/slack-notify` composite action.
+   This is the *"how did it finish?"* signal (status + one-line summary + run
+   link), and it lives where the real outcome is known (the runner), not where
+   the dispatch happens (the Worker, which only knows "I sent the POST").
+
+healthchecks answers *"did the workflow start?"*; Slack answers *"how did it
+finish?"*. Together they close the silent-failure gap from both ends. This is
+the lightweight precursor to the in-app #122 pipeline-health view.
+
+### Credential hygiene follow-up
+
+While fixing the outage we temporarily set the Worker secret to the operator's
+personal `gh` CLI token (proven working) to restore service immediately, then
+swapped it for a dedicated **fine-grained PAT** ("Wrangler Cron", repo-scoped,
+`Actions: Read and write` only, ~1yr expiry). The cron no longer depends on any
+interactive CLI session. Rotation is browser-mint + `wrangler secret put` —
+**always verify with `wrangler secret list` afterward**, since a failed put is
+exactly what caused this incident and it fails silently.
