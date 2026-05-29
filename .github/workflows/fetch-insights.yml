@@ -140,3 +140,15 @@ jobs:
           echo "- Commit:  ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Inspect rows: [pipeline_runs](https://supabase.com/dashboard/project/${{ secrets.SUPABASE_PROJECT_REF }}/editor?ref=pipeline_runs)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        # Fires on success AND failure so you get a daily completion ping plus
+        # an immediate alert if the nightly run breaks. No-ops if the webhook
+        # secret is unset. Checkout (step 1) makes the composite action available.
+        if: always()
+        uses: ./.github/actions/slack-notify
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "Fetch Insights"
+          summary: "Nightly insights pipeline — fresh predictions for the next trading session are computed and live."

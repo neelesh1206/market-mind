@@ -1,0 +1,94 @@
+name: "Slack notify"
+description: >
+  Post a pipeline-completion message to Slack via an incoming webhook.
+  No-ops gracefully when the webhook URL is empty (e.g. on a fork, or before
+  the SLACK_WEBHOOK_URL secret is configured) so it never fails a job.
+
+inputs:
+  webhook_url:
+    description: "Slack incoming webhook URL. Empty = skip (no-op, never fails)."
+    required: false
+    default: ""
+  status:
+    description: "Job status — pass `${{ job.status }}` (success/failure/cancelled)."
+    required: true
+  title:
+    description: "Human job name, e.g. 'Fetch Insights'."
+    required: true
+  summary:
+    description: "One-line description of what the job does. Optional."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Post completion message to Slack
+      shell: bash
+      env:
+        # Passed via `with:` rather than read from secrets directly because
+        # composite actions can't see the caller's secrets context.
+        SLACK_WEBHOOK_URL: ${{ inputs.webhook_url }}
+        STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+        SUMMARY: ${{ inputs.summary }}
+        TRIGGER: ${{ github.event_name }}
+        SHA: ${{ github.sha }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+          echo "SLACK_WEBHOOK_URL not set — skipping Slack notification (this is fine)."
+          exit 0
+        fi
+
+        # Status → Slack emoji shortcode + headline verb. Shortcodes (not raw
+        # emoji) keep this file ASCII; Slack renders them client-side.
+        case "${STATUS}" in
+          success)   ICON=":white_check_mark:"; HEAD="completed";;
+          failure)   ICON=":x:";                HEAD="FAILED";;
+          cancelled) ICON=":warning:";          HEAD="was cancelled";;
+          *)         ICON=":grey_question:";     HEAD="${STATUS}";;
+        esac
+
+        SHORT_SHA="${SHA:0:7}"
+        NOW="$(date -u '+%Y-%m-%d %H:%M UTC')"
+        HEADLINE="${ICON} *${TITLE}* ${HEAD}"
+        CONTEXT=":clock3: ${NOW}  ·  trigger: \`${TRIGGER}\`  ·  commit \`${SHORT_SHA}\`"
+
+        # Build the body section text: headline, then the optional summary on
+        # its own line. jq -n produces correctly-escaped JSON regardless of
+        # what characters the summary contains.
+        BODY="${HEADLINE}"
+        if [ -n "${SUMMARY}" ]; then
+          BODY="${HEADLINE}"$'\n'"${SUMMARY}"
+        fi
+
+        payload="$(jq -n \
+          --arg headline "${HEADLINE}" \
+          --arg body "${BODY}" \
+          --arg context "${CONTEXT}" \
+          --arg run_url "${RUN_URL}" \
+          '{
+            text: $headline,
+            blocks: [
+              { type: "section", text: { type: "mrkdwn", text: $body } },
+              { type: "context", elements: [ { type: "mrkdwn", text: $context } ] },
+              { type: "actions", elements: [
+                  { type: "button",
+                    text: { type: "plain_text", text: "View run", emoji: false },
+                    url: $run_url }
+              ] }
+            ]
+          }')"
+
+        # Slack replies "ok" (HTTP 200) on success. Fail soft: a notification
+        # hiccup must never turn a green pipeline run red. -w prints the code
+        # for the Actions log so a misconfigured webhook is debuggable.
+        code="$(curl -sS -o /tmp/slack_resp.txt -w '%{http_code}' \
+          -X POST -H 'Content-type: application/json' \
+          --data "${payload}" "${SLACK_WEBHOOK_URL}" || echo "000")"
+        echo "Slack responded HTTP ${code}: $(cat /tmp/slack_resp.txt 2>/dev/null || true)"
+        if [ "${code}" != "200" ]; then
+          echo "::warning::Slack notification failed (HTTP ${code}) — not failing the job."
+        fi

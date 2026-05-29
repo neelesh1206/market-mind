@@ -116,3 +116,12 @@ jobs:
           echo "- Dry run: ${{ inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Skip backfill: ${{ inputs.skip_backfill || 'false' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: always()
+        uses: ./.github/actions/slack-notify
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "Compute Stock Rotation"
+          summary: "Weekly universe rotation — demoted stale tickers, promoted top-voted requests, backfilled new ones."
